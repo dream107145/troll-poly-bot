@@ -193,3 +193,49 @@ def test_paging_sorts_over_the_whole_set_and_clamps():
     assert page(rows, 1, 0)["page_size"] == 1
     assert page([], 1)["total_pages"] == 1 and page([], 1)["rows"] == []
     assert page(rows, 1)["page_size"] == DEFAULT_PAGE_SIZE
+
+
+def test_disk_usage_counts_both_files_and_follows_the_image(tmp_path):
+    """What the archive costs, so the operator can decide to stop saving images."""
+    d = write(tmp_path, window(slug="btc-updown-5m-1"), png=True)
+    write(tmp_path, window(slug="eth-updown-5m-2", asset="ETH"))          # no image
+    json_a = (d / "btc-updown-5m-1.json").stat().st_size
+    png_a = (d / "btc-updown-5m-1.png").stat().st_size
+    json_b = (d / "eth-updown-5m-2.json").stat().st_size
+
+    ix = ArchiveIndex(d, tmp_path / "index.json")
+    s = stats(ix.all_rows())
+    assert s["images"] == 1
+    assert s["bytes"] == json_a + png_a + json_b
+
+    # an image added later is picked up even though its JSON never moved
+    (d / "eth-updown-5m-2.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"x" * 500)
+    png_b = (d / "eth-updown-5m-2.png").stat().st_size
+    assert ix.refresh()["updated"] == 1
+    s2 = stats(ix.all_rows())
+    assert s2["images"] == 2
+    assert s2["bytes"] == json_a + png_a + json_b + png_b
+
+    # and removing one is reflected too
+    (d / "btc-updown-5m-1.png").unlink()
+    ix.refresh()
+    s3 = stats(ix.all_rows())
+    assert s3["images"] == 1 and s3["bytes"] == json_a + json_b + png_b
+
+
+def test_an_index_cached_before_sizes_were_tracked_heals_itself(tmp_path):
+    """The row shape gained `bytes`; an older cache must not report zero forever."""
+    import json as _json
+    d = write(tmp_path, window(slug="btc-updown-5m-1"), png=True)
+    cache = tmp_path / "index.json"
+    ix = ArchiveIndex(d, cache)
+    ix.refresh()
+
+    raw = _json.loads(cache.read_text(encoding="utf-8"))
+    for row in raw["rows"].values():
+        row.pop("bytes", None)                     # what the older cache looked like
+    cache.write_text(_json.dumps(raw), encoding="utf-8")
+
+    again = ArchiveIndex(d, cache)
+    assert again.refresh()["updated"] == 1         # noticed and repaired
+    assert stats(again.all_rows())["bytes"] > 0

@@ -76,6 +76,13 @@ const fmt = {
   // seconds rather than becoming an unreadable 0:06
   dur: (s) => (s < 60 ? `${s < 10 ? s.toFixed(1) : Math.round(s)}s`
     : `${Math.floor(s / 60)}m ${String(Math.round(s % 60)).padStart(2, '0')}s`),
+  bytes: (b) => {
+    if (!b) return '0 B';
+    const u = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.min(u.length - 1, Math.floor(Math.log(b) / Math.log(1024)));
+    const v = b / (1024 ** i);
+    return `${v >= 100 || i === 0 ? Math.round(v) : v.toFixed(1)} ${u[i]}`;
+  },
   mkt: (slug) => (slug || '').replace('-updown-5m-', ' '),
   mmss: (s) => {
     const t = Math.max(0, Math.round(s));
@@ -204,7 +211,13 @@ function applyLive(live, slug) {
   state.live = usable ? live : null;
   $('#idle').hidden = !!usable;
   $('#live').hidden = !usable;
-  if (usable) render();
+  if (usable) {
+    render();
+    // Not inside render(): that only runs while the market page is open, and
+    // a window closing while the operator reads the ledger must still be
+    // saved. The export draws offscreen, so it needs no visible chart.
+    archiveClosedWindows();
+  }
 }
 
 async function pollLive() {
@@ -874,6 +887,17 @@ function renderPriceChart(slug = state.selected, host = $('#price-chart'),
    points to data/charts/<slug>.json, so a window is never lost when the page
    is shut. */
 
+/* Saving an image for every window is on by default, because the archive is
+   the point of keeping them. It is also the one thing here that grows without
+   bound on disk, so it is a switch: ?savecharts=0|1 wins, else what was
+   chosen last, else on. Turning it off stops new images only — the bot still
+   archives the raw points, so nothing about the record is lost. */
+state.saveCharts = (() => {
+  const q = new URLSearchParams(location.search).get('savecharts');
+  if (q === '1' || q === '0') return q === '1';
+  try { return localStorage.getItem('tpb-save-charts') !== '0'; } catch { return true; }
+})();
+
 const exported = (() => {
   try { return new Set(JSON.parse(localStorage.getItem('tpb-charts') || '[]')); }
   catch { return new Set(); }
@@ -997,7 +1021,7 @@ async function exportChartPng(slug) {
 let exporting = false;
 
 async function archiveClosedWindows() {
-  if (exporting || !state.live) return;
+  if (exporting || !state.live || !state.saveCharts) return;
   const meta = state.live.history_meta || {};
 
   // Wait for the bot to publish the RESOLVED window rather than firing the
@@ -1586,7 +1610,6 @@ function render(force = false) {
   if (!state.overlay) renderStrikeChart();
   renderPriceChart();
   renderSpotChart();
-  archiveClosedWindows();
 
   const mkSig = JSON.stringify(d.live_markets || []);
   if (force || changed('markets', mkSig)) renderMarkets();
@@ -2190,6 +2213,9 @@ function renderSaved() {
 
   $('#saved-kpis').innerHTML = [
     { l: 'Windows kept', v: fmt.num(s.windows || 0), n: `${(s.assets || []).length} assets` },
+    { l: 'On disk', v: fmt.bytes(s.bytes || 0),
+      n: `${fmt.num(s.images || 0)} with an image`
+        + (state.saveCharts ? '' : ' · saving paused') },
     { l: 'We traded', v: fmt.num(s.traded || 0),
       n: s.windows ? `${fmt.pct((s.traded || 0) / s.windows)} of them` : '—' },
     { l: 'Realised on those', v: fmt.signed(s.pnl || 0),
@@ -2381,6 +2407,18 @@ function wireSaved() {
     typing = setTimeout(() => loadSaved(true), 250);
   });
   $('#saved-rescan').addEventListener('click', () => loadSaved());
+  const toggle = $('#save-charts-toggle');
+  toggle.checked = state.saveCharts;
+  toggle.addEventListener('change', (ev) => {
+    state.saveCharts = ev.target.checked;
+    try { localStorage.setItem('tpb-save-charts', state.saveCharts ? '1' : '0'); }
+    catch { /* private mode */ }
+    notice(state.saveCharts
+      ? 'Saving a chart image for each window as it closes.'
+      : 'Not saving new chart images. Windows already saved are kept, and the '
+        + 'bot still records every window to data/charts as JSON.', false);
+    renderSaved();
+  });
   $('#saved-gallery').addEventListener('click', (ev) => {
     const card = ev.target.closest('[data-slug]');
     if (card) openSaved(card.dataset.slug);

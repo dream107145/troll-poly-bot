@@ -138,11 +138,16 @@ class ArchiveIndex:
                          if SLUG_RE.match(p.stem)}
             except OSError:
                 files = {}
-            pngs = set()
+            png_bytes: dict[str, int] = {}
             try:
-                pngs = {p.stem for p in self.chart_dir.glob("*.png")}
+                for p in self.chart_dir.glob("*.png"):
+                    try:
+                        png_bytes[p.stem] = p.stat().st_size
+                    except OSError:
+                        png_bytes[p.stem] = 0
             except OSError:
                 pass
+            pngs = set(png_bytes)
 
             added = updated = 0
             for slug, path in files.items():
@@ -153,8 +158,11 @@ class ArchiveIndex:
                 stamp = [st.st_mtime, st.st_size]
                 have = self._rows.get(slug)
                 if have is not None and have.get("_stamp") == stamp:
-                    if have.get("has_png") != (slug in pngs):
+                    # a window can gain or lose its image without its JSON moving
+                    want_bytes = st.st_size + png_bytes.get(slug, 0)
+                    if have.get("has_png") != (slug in pngs) or have.get("bytes") != want_bytes:
                         have["has_png"] = slug in pngs
+                        have["bytes"] = want_bytes
                         updated += 1
                     continue
                 try:
@@ -165,6 +173,7 @@ class ArchiveIndex:
                     continue
                 row = summarise(doc, slug, has_png=slug in pngs)
                 row["_stamp"] = stamp
+                row["bytes"] = st.st_size + png_bytes.get(slug, 0)
                 self._rows[slug] = row
                 added += 1 if have is None else 0
                 updated += 0 if have is None else 1
@@ -239,6 +248,10 @@ def stats(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "win_rate": round(wins / len(settled), 4) if settled else None,
         "up_share": round(ups / decided, 4) if decided else None,
         "assets": sorted({r["asset"] for r in rows if r.get("asset")}),
+        # what the archive costs on disk, so the operator can decide whether
+        # to keep saving an image for every window
+        "bytes": sum(int(r.get("bytes") or 0) for r in rows),
+        "images": sum(1 for r in rows if r.get("has_png")),
     }
 
 

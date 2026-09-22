@@ -426,6 +426,19 @@ marked on the path, which a picture cannot do. `?window=<slug>` links a
 particular window. Slugs are matched against the market-slug pattern rather
 than sanitised, so no crafted name reaches outside the archive.
 
+**Saving the images is a switch** on that page, with the archive's size on
+disk beside it so the choice is an informed one -- a few days of every asset
+reaches ~300 MB. Turning it off stops new images only: windows already saved
+are kept, and the bot goes on recording every window's points to JSON, so
+nothing about the research record is lost. The choice is remembered, and
+`?savecharts=0|1` overrides it.
+
+The image is rendered in the browser rather than in Python so that the saved
+picture *is* the chart on screen; a second plotting implementation server side
+would drift away from this one. It draws offscreen, so it does not need the
+market page to be open -- a window closing while you read the ledger is still
+saved.
+
 The chart is **pushed, not polled**. The page opens a websocket to `/ws` and
 the server sends the state as the bot writes it -- measured 9.5 pushes/sec at
 ~6 KB each, a 3 ms first paint. Polling `/api/live` stays wired as the
