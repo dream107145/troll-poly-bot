@@ -30,6 +30,9 @@ strategy shows a statistically defensible edge after the venue's real fee
 curve, and the bot is now built to *collect that evidence* while refusing most
 trades with a reason code.
 
+New to prediction markets? [docs/polymarket-trading-guide.md](docs/polymarket-trading-guide.md)
+covers trading basics, how Polymarket works, and well-known strategies.
+
 ## What the bot does
 
 ```
