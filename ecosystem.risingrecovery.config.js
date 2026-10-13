@@ -55,6 +55,7 @@ module.exports = {
         TPB_RTR_OPT_MOM_LOW: '0.30',
         TPB_RTR_OPT_MOM_HIGH: '0.40',
         TPB_RTR_OPT_MOM_TARGET: '0.50',
+        TPB_RTR_OPT_MOM_SHARES: '5',             // momentum phase: buy 5 of the lower-priced token every 3 s (0 = optimizer)
         TPB_RTR_OPT_QUANTITIES: '5,10,15,20',
         TPB_RTR_OPT_MIN_IMPROVEMENT: '0.05',
         TPB_RTR_OPT_TIE_EPS: '0.01',

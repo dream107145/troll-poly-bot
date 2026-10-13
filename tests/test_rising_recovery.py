@@ -1420,3 +1420,32 @@ def test_opt_failed_initial_order_is_resent_after_the_30_s_window_to_the_rising_
     for i in range(12):
         out += w2.step(40.0 + i * 0.25, 100000.0, up=(0.44, 0.45), dn=(0.54 + 0.005 * i, 0.55 + 0.005 * i))
     assert [s for _, s, _ in out if s] == [] and "init" not in w2.book.fired
+
+
+def test_opt_momentum_phase_buys_the_lower_token_every_three_seconds_until_it_ends():
+    # the user 10-13: "buy tokens if the lower token is rising up to 0.4, buy the tokens every 3 s"
+    w = _O(opt_mom_shares=5.0)
+    b = w.e._book(w.m)                                                # noqa: SLF001
+    b.fired.add("init")
+    sent = []
+    ds = [0.33, 0.34, 0.35, 0.36, 0.37, 0.38, 0.39, 0.40, 0.41, 0.42, 0.43, 0.44, 0.45, 0.46, 0.47, 0.48]
+    for i, d in enumerate(ds):
+        out = w.step(7.0 + i * 0.5, 100000.0, up=(round(1 - d - 0.02, 2), round(1 - d - 0.01, 2)), dn=(round(d - 0.01, 2), d))
+        for _, s_, o_ in out:
+            sent.append((7.0 + i * 0.5, s_, o_.size))
+            w.fill(o_, 7.0 + i * 0.5 + 0.1, price=d)
+            w.e.on_pair_done(o_.order_id, filled=True)
+            w.e.end_guard.clear()
+    assert sent and all(s_ == "DOWN" and q == pytest.approx(5.0) for _, s_, q in sent)   # the rising lower token, fixed size
+    gaps = [t2 - t1 for (t1, _, _), (t2, _, _) in zip(sent, sent[1:])]
+    assert gaps and min(gaps) >= 3.0 - 1e-9                           # every 3 s, not every pass
+    assert b.D >= 10.0 and b.U == 0.0                                 # bought although the worst case only got worse
+    for i, d in enumerate((0.49, 0.50, 0.51, 0.51)):                  # the 0.50 target ends the phase: no more buys
+        out = w.step(16.0 + i * 0.5, 100000.0, up=(round(1 - d - 0.02, 2), round(1 - d - 0.01, 2)), dn=(round(d - 0.01, 2), d))
+    assert not b.opt_in_mom and b.opt_mom_side is None
+    n = len(sent)
+    for i, d in enumerate((0.52, 0.53, 0.54, 0.55, 0.56, 0.57, 0.58)):
+        for _, s_, o_ in w.step(18.0 + i * 0.5, 100000.0, up=(round(1 - d - 0.02, 2), round(1 - d - 0.01, 2)), dn=(round(d - 0.01, 2), d)):
+            if o_.size == 5.0 and s_ == "DOWN":
+                sent.append((18.0 + i * 0.5, s_, o_.size))
+    assert len(sent) == n                                             # outside the phase the fixed buys stop
