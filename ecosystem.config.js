@@ -42,15 +42,20 @@ module.exports = {
       ...common,
       name: 'tpb-web',
       script: PYTHON,
-      // bound to all interfaces at the operator's request -- NO AUTH on this API
-      args: '-m troll_poly_bot.web --host 74.208.192.242 --port 8765 --no-browser',
+      // routable, for remote access on this VPS. Behind the email/password
+      // gate (TPB_ADMIN_* in .env) -- but plain HTTP, so the password and
+      // the session cookie cross the network in clear. Put TLS in front and
+      // set TPB_ADMIN_COOKIE_SECURE=1, or bind 127.0.0.1 and tunnel over SSH.
+      args: '-m troll_poly_bot.web --host 149.33.42.112 --port 8765 --no-browser',
       max_memory_restart: '300M',
     },
     {
       ...common,
       name: 'tpb-bot',
       script: PYTHON,
-      args: '-m troll_poly_bot --balance 100 --assets BTC,ETH,SOL,XRP --log-level INFO',
+      // --live --armed without --mode means MICRO-LIVE (1 USDC/order, 5 open, 3/day loss);
+      // --mode live needs graduation (graduation.py). No --assets: trade every listed market.
+      args: '-m troll_poly_bot --balance 50 --live --armed --log-level INFO',
       max_memory_restart: '600M',
     },
   ],

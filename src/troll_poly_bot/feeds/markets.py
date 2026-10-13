@@ -192,10 +192,39 @@ class StrikeTracker:
     """
 
     tolerance_ms: float = 2000.0
+    #: (2026-10-08) every strike taken is saved here, so a bot restarted mid-market reuses the SAME strike for that market
+    #: instead of skipping it (attach_store; data/strikes.<tag>.json)
+    store_path: object = None
+    _saved: dict[str, float] = field(default_factory=dict)
     _last_price: dict[str, tuple[float, float]] = field(default_factory=dict)
     _pending: list[MarketMeta] = field(default_factory=list)
     _struck: dict[str, MarketMeta] = field(default_factory=dict)
     _abandoned: int = 0
+
+    def attach_store(self, path) -> None:
+        import json
+        from pathlib import Path
+        self.store_path = Path(path)
+        try:
+            self._saved = {str(k): float(v) for k, v in json.loads(self.store_path.read_text()).items()}
+        except (OSError, ValueError, TypeError, AttributeError):
+            self._saved = {}
+
+    def _save(self, slug: str, price: float) -> None:
+        if self.store_path is None:
+            return
+        import json
+        import os
+        self._saved[slug] = float(price)
+        while len(self._saved) > 300:
+            self._saved.pop(next(iter(self._saved)))
+        try:
+            tmp = f"{self.store_path}.tmp"
+            with open(tmp, "w") as f:
+                json.dump(self._saved, f)
+            os.replace(tmp, self.store_path)
+        except OSError as exc:
+            log.warning("could not save the strike of %s: %s", slug, exc)
 
     def on_price(self, asset: str, price: float, ts: float) -> None:
         self._last_price[asset] = (price, ts)
@@ -215,6 +244,15 @@ class StrikeTracker:
                 still.append(meta)
                 continue
             last = self._last_price.get(meta.market.asset)
+            saved = self._saved.get(meta.market.slug)
+            if saved is not None and (last is None or abs(meta.market.open_ts - last[1]) > self.tolerance_ms):
+                # restarted after this market opened: the strike this bot took at its open, not a guess
+                meta.market.strike = saved
+                self._struck[meta.market.slug] = meta
+                newly.append(meta)
+                log.warning("strike of %s restored from %s: %.2f (the bot was restarted after its open)",
+                            meta.market.slug, self.store_path, saved)
+                continue
             if last is None:
                 self._abandoned += 1
                 log.warning("no oracle price for %s; cannot strike %s",
@@ -232,6 +270,7 @@ class StrikeTracker:
             meta.market.strike = price
             self._struck[meta.market.slug] = meta
             newly.append(meta)
+            self._save(meta.market.slug, price)
         self._pending = still
         return newly
 

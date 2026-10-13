@@ -162,6 +162,40 @@ is checked first, and its fee guard never applies to a stop -- refusing to cut
 a loss because the exit costs a fee is how a small loss becomes the whole
 stake.
 
+## Resting the entry instead of hitting the ask
+
+Every taker fill-or-kill the live bot sent on 2026-09-22 was killed -- 14 of
+14 -- and the recorded books show why: the model only finds edge in a quote
+that is about to vanish (HYPE's ask flickered 0.93 → 0.89 → 0.77 → 0.88 inside
+two seconds), and a taker loses that race at any latency, the VPS's 40 ms
+included. Paper filled ~40% of the same orders because its matcher fills
+against the bot's *own* delayed book; real makers cancel faster than that.
+
+`engine.maker_entry` turns the entry into a **post-only GTC limit** that rests
+`maker_improve_ticks` above the best bid (always at least one tick below the
+ask, so it can never cross and become the taker it was meant to replace).
+The venue charges takers only, so a resting fill pays **no fee** -- roughly
+1.5c/share of edge handed back at mid prices -- and there is no arrival
+slippage; what a maker pays instead is adverse selection, which the paper
+engine models pessimistically (a resting order fills only when the market
+trades *through* it). The bot cancels an unfilled order after `maker_ttl_s`
+(default 20 s) and cancels everything still open on shutdown; a venue-side
+expiration (the SDK's 3-minute minimum) bounds a crash. Fills are polled once
+a second and booked at our price; the strategy gets one result per order,
+fills included, when it completes, so `inflight` holds the market for the
+order's whole life and it is never doubled up.
+
+```
+engine.maker_entry           false     rest the entry (dashboard: Entry style)
+engine.maker_improve_ticks   1         ticks above the bid; 0 joins it
+engine.maker_ttl_s           20        cancel an unfilled resting order after this
+```
+
+Nothing about this is measured yet. It removes the reason the taker never
+fills; whether the fills it gets are the ones you want is the question the
+evidence statistic exists to answer, and it needs the same few hundred
+epochs as everything else here.
+
 ## When a window never resolves
 
 The venue outcome does not always arrive. After `SETTLE_MAX_ATTEMPTS` retries
@@ -299,8 +333,9 @@ Three locks, in order:
 3. **Caps outside the strategy** (`--max-order-usdc 5`, `--max-open-usdc 25`,
    `--max-daily-loss 10`, `--max-orders-per-hour 60`) plus a **kill file**:
    create `data/KILL` and nothing further is sent. Five consecutive venue
-   errors also halt it. Orders are fill-or-kill only, so stopping the process
-   never leaves a resting order behind.
+   errors also halt it. Entries are fill-or-kill unless `engine.maker_entry` is on, in which
+   case the one resting order per market is cancelled on shutdown and
+   bounded by a venue-side expiry if the process dies.
 
 Bankroll: `--balance` is what the risk caps scale to, capped to what the
 account holds. The bot's balance is that bankroll plus the venue's cash
@@ -317,6 +352,131 @@ and is counted in equity; the next reconciliation retires it.
 
 Fees are estimated from the market's schedule per fill; the venue's real
 deduction is what the balance reconciliation reflects.
+
+## Why paper won and live lost (2026-09-22), and what changed
+
+Read [docs/live_audit_2026-09-22.md](docs/live_audit_2026-09-22.md). The short
+version: the paper engine filled orders against the bot's own copy of the
+venue book, which lags the venue by seconds; every paper profit was a quote
+the venue had already pulled (27 of the 29 comparable real orders were
+killed). Since then:
+
+* **Execution scenarios** (`execution/scenarios.py`). The paper engine only
+  books a fill if the quote is still on the local book `quote_survival_ms`
+  later. `--scenario realistic` (default, 2 s) reproduces 25 of 30 live
+  kills; `conservative` (3 s, contention, random rejects) and `stress` must
+  both be survived before capital is raised; `optimistic` is the old engine.
+* **STALE_QUOTE gate** (`strategy/engine.py`). No order into the side spot
+  has just moved toward while the token has not re-priced.
+* **Trade forensics** (`data/trade_forensics.jsonl`). One timestamped record
+  per order through MARKET_DATA -> ... -> SETTLED, PnL after fees decides
+  the win, a sign disagreement is flagged and trips the guard.
+* **Guard** (`risk/guard.py`). Entries stop on feed loss, stale data, a run
+  of killed orders, latency, unexplained venue cash movement, a position the
+  venue holds that the bot does not, a PnL mismatch, a losing streak or a
+  venue halt. Exits keep running. Shown as `guard` in the state.
+* **Reconciliation**. At start-up the venue's open orders are cancelled and
+  its positions compared with ours; every 30 s cash, positions and orders are
+  compared again.
+* **Deployment modes and graduation** (`graduation.py`).
+
+```bash
+python -m troll_poly_bot --balance 100                        # PAPER, realistic scenario
+python -m troll_poly_bot --balance 100 --scenario conservative
+python -m troll_poly_bot --balance 100 --mode shadow          # real account, orders signed, never posted
+python -m troll_poly_bot --balance 100 --mode micro-live      # real orders, 1 USDC/order, 5 open, 3/day loss
+python -m troll_poly_bot --balance 100 --mode live            # refused until graduation.assess() passes
+
+python scripts/paper_vs_live.py                               # the comparison table
+python scripts/loss_attribution.py                            # losing trades and unfilled orders by cause
+```
+
+`--live --armed` without `--mode` now means **micro-live**: the caps are
+clamped whatever the command line says. `--mode live` needs at least 300 real
+epochs with a per-epoch t-statistic of 2 in `data/earnings.jsonl`, or an
+explicit `TPB_GRADUATION_OVERRIDE=I_ACCEPT_UNPROVEN_EDGE`.
+
+### Execution realism for MOMENTUM_TAKER (2026-09-23)
+
+Read [docs/momentum_execution_2026-09-23.md](docs/momentum_execution_2026-09-23.md).
+In short: paper now draws order latency from the venue's MEASURED round trips
+(it used a 35 ms Gamma GET; real POSTs take 218-661 ms); each token has a
+quote age that is not auto-widened; the momentum engine prices a maximum entry
+price (fee, exit fee and spread, slippage, latency, model uncertainty) that is
+also the order's cap; entries are re-checked in the venue worker right before
+the POST; every fill is marked out 100 ms-30 s later (adverse selection) and
+every skipped signal is followed to its fate (good / bad miss); shadow runs
+realistic paper PLUS the real path in dry run; the kill switch works in every
+mode; the guard latches on any trade on the account this process did not
+place. `scripts/replay_momentum.py` replays the archive with train /
+validation / out-of-sample periods; `scripts/momentum_report.py` reads what the
+bot recorded. The momentum stages have their own pm2 file,
+`ecosystem.momentum.config.js`.
+
+### SPOT_LAG, experimental (2026-09-24)
+
+Read [docs/spot_lag_study_2026-09-23.md](docs/spot_lag_study_2026-09-23.md).
+After a 1 s spot shock of at least 3 sigma, `strategy/spot_lag.py` buys the
+favoured token only if its executable ask is still at least 2c (after both
+fees, the exit's half spread, slippage and uncertainty) below where the
+market's own pricing curve says it should be now, with a FOK capped at the max
+entry price, and sells 5 s later. The broad "buy what looks behind" version
+lost in every period; this narrow one was +3.5c/share out of sample but is
+BTC-heavy and not yet confirmed on real fills. It is behind
+`TPB_SPOT_LAG_ENABLED=1`, and real orders additionally need
+`TPB_SPOT_LAG_ALLOW_REAL=1`. Stages: `ecosystem.spotlag.config.js`
+(`tpb-spotlag-paper`, `tpb-spotlag-shadow`, and `tpb-spotlag-live`: real money at the
+micro-live caps, no autorestart); all use `--scenario venue_lag`.
+`scripts/record_ticks.py` + `scripts/spot_lag_ticks.py` measure lead/lag and
+fills against venue-timestamped books.
+
+**Multi-market.** Every 5-minute market (one asset in one window, identified by
+its slug) is evaluated on its own every 200 ms. Each market gets at most
+`TPB_SPOT_LAG_MAX_ENTRIES_PER_MARKET` (1) filled entry and
+`TPB_SPOT_LAG_MAX_ATTEMPTS_PER_MARKET` (3) buy orders. Positions in different
+markets coexist, and each is sold on its own 5 s timer. The limits are
+**global**:
+- `MAX_SIMULTANEOUS_POSITIONS` (4) counts open positions plus working entries.
+- `MAX_TOTAL_EXPOSURE_USDC` (10) counts every position plus every in-flight
+  order at its limit price, so markets signalling in the same tick cannot
+  together overfill it.
+- `MAX_BUYS_PER_HOUR` (60) and `MAX_DAILY_LOSS_USDC` (10) cover all markets.
+
+An order that would not fit the remaining exposure is shrunk to fit if it is
+still a valid order, otherwise refused. Open positions and today's realised
+PnL are saved to `data/open_positions<tag>.json` and restored on restart,
+never across paper and live. Every decision is logged as
+`[MARKET]`/`[SIGNAL]`/`[ORDER]`/`[POSITION]`/`[SKIP] <reason>`.
+
+### REPRICED_MOMENTUM, experimental, paper only (2026-09-24)
+
+Read [docs/repriced_momentum_2026-09-24.md](docs/repriced_momentum_2026-09-24.md).
+This tests a different idea from spot-lag. After a shock, the token has
+already moved part of the way to its fair value, and the spot and the token are
+both still moving. `strategy/repriced_momentum.py` buys that continuation with
+a FOK at the ask and sells within seconds. **The research found no edge.** No
+configuration was positive on the held-out periods. The rule chosen on
+training lost 1.8c/share on unseen data. The momentum is real, but it is
+smaller than a round trip's spread plus two fees, and the orders that fill are
+the ones where the move stalled.
+
+The strategy has its own id, `repriced_momentum`, on every ledger and
+forensics row. It has its own settings (`TPB_REPRICED_MOM_*`), its own budget
+(1 position, $5 exposure, $3 per order, $5 daily loss; the dashboard cannot
+raise these) and its own tagged files. It is behind
+`TPB_REPRICED_MOM_ENABLED=1`, and real orders would need
+`TPB_REPRICED_MOM_ALLOW_REAL=1`, which nothing sets. Paper only:
+`ecosystem.repricedmom.config.js` (`tpb-repricedmom-paper`). Every candidate is
+written with its features and a `REJECT_*` reason to
+`data/repriced_momentum_candidates.<tag>.jsonl`. Log lines start with `[MOM]`.
+The research replay is `scripts/replay_repriced_momentum.py`, and its execution
+model is shared with spot-lag (`backtest/spot_shock_replay.py`).
+A second, broader study ([docs/repriced_momentum_research_2026-09-24.md](docs/repriced_momentum_research_2026-09-24.md), `scripts/research_repriced_momentum.py` + `scripts/analyze_repriced_momentum.py`) searched shock size, cross-exchange confirmation, the Polymarket book, entry and exit styles and an expected-value model. No subset of repriced tokens beats the costs out of sample. Recommendation: **abandon**.
+
+**To stop trading**: `touch data/KILL` stops every new entry and leaves exits
+(stop-loss, take-profit) working; `touch data/KILL_ALL` stops everything;
+`pm2 stop tpb-bot` stops the process, which cancels any resting order on the
+way out. The dashboard's Halt button writes `data/KILL`.
 
 ## The dashboard
 
@@ -508,17 +668,65 @@ corrupt the record. Everything else in the UI (state, history, sims) is
 unaffected. If you would rather drive the trader from the console, run
 `pm2 delete tpb-bot` and keep only `tpb-web` under pm2.
 
-The dashboard **has no auth**. `do_POST` will start the trader, queue sim jobs
-and write files for anyone who can reach the port, so the bind address is the
-only access control there is.
+## Signing in
 
-`ecosystem.config.js` is set to `--host 0.0.0.0` for remote access on a VPS.
-That publishes the unauthenticated API to every interface; pair it with a
-reverse proxy that requires a password, or a firewall rule limiting port 8765
-to known source addresses. To keep it closed instead, set `--host 127.0.0.1`
-and forward the port over SSH:
+The dashboard is **not read-only**: `do_POST` starts and stops the trader,
+rewrites `data/controls.json` and creates the kill file. So it asks for an
+email and a password, and **refuses to start without one configured** -- an
+unauthenticated console is not a state this can be left in by forgetting a
+setting.
 
 ```bash
+# .env
+TPB_ADMIN_EMAIL=you@example.com
+TPB_ADMIN_PASSWORD=a-long-random-passphrase
+```
+
+One admin, set out of band. There is no registration, no user database and no
+password reset -- the recovery path is editing `.env` and restarting, which is
+the right amount of machinery for a single-operator trading console.
+
+Prefer storing a hash, so a leaked `.env` is not a usable credential. It takes
+precedence when both are set:
+
+```bash
+python scripts/hash_password.py          # prompts; nothing echoed, nothing in $HISTFILE
+# TPB_ADMIN_PASSWORD_HASH=pbkdf2_sha256$600000$...$...
+```
+
+What the gate actually does:
+
+```
+password       PBKDF2-HMAC-SHA256, 600k rounds, 16-byte salt, constant-time compare
+session        secrets.token_urlsafe(32) in an HttpOnly SameSite=Lax cookie,
+               12 h absolute / 2 h idle, held in memory -- a restart signs you out
+throttle       8 failures per address per 5 min, then 429; each failure costs 250 ms
+login page     served inline, not from static/ -- an anonymous caller gets exactly
+               one document and no hint of what is behind it
+scope          EVERYTHING is behind it: /api/*, /ws, the static bundle. The
+               favicon is the one exception, because the login page draws it
+```
+
+Both halves of a wrong login return one message, so an attacker cannot learn
+which addresses are valid. `?next=` is checked to be a path on this server:
+an open redirect here would make the login page a credible way to bounce
+someone somewhere else.
+
+### Still put TLS in front of it
+
+`ecosystem.config.js` binds a routable address for remote access on a VPS. A
+password over plain HTTP crosses the network in clear, and so does the session
+cookie -- **authentication is not confidentiality**. The server logs a warning
+at startup when it is bound off-loopback without TLS. Terminate TLS in a proxy
+in front and set `TPB_ADMIN_COOKIE_SECURE=1`, so the cookie is never sent over
+a plaintext hop, and keep a firewall rule limiting port 8765 to addresses you
+expect.
+
+To skip all of that, bind loopback and forward the port over SSH -- encrypted,
+and nothing is exposed at all:
+
+```bash
+# ecosystem.config.js: --host 127.0.0.1
 ssh -N -L 8765:127.0.0.1:8765 user@host     # then browse 127.0.0.1:8765 locally
 ```
 
@@ -543,7 +751,8 @@ src/troll_poly_bot/
   execution/               latency model, paper matching engine
   backtest/                archive loader (bell-graded), decision dataset, execution replay
   analytics/scorecard.py   scorecards
-  web/                     dashboard
+  web/                     dashboard (auth.py: the login gate; login.py: its page)
+scripts/hash_password.py   TPB_ADMIN_PASSWORD_HASH for .env
 scripts/research_*.py      every table in docs/strategy.md
 scripts/smoke_*.py         live probes of discovery and the spot feeds
 tests/                     207 tests

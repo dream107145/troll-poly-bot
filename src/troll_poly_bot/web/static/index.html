@@ -9,7 +9,7 @@
 <link rel="apple-touch-icon" href="/static/favicon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&display=swap">
 <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
@@ -24,6 +24,10 @@
   </div>
 
   <div class="controls" role="group" aria-label="Bot controls">
+    <label class="ctl-field ctl-bot" title="Which bot this page shows. Every bot writes its own state and trade log.">
+      <span>Bot</span>
+      <select id="bot-select" aria-label="Which bot to show"><option value="main">main</option></select>
+    </label>
     <span class="badge" id="bot-badge" data-state="stopped">
       <span class="dot" aria-hidden="true"></span><span id="bot-state">stopped</span>
     </span>
@@ -41,6 +45,8 @@
     <button id="theme-toggle" class="btn btn-ghost" type="button" aria-label="Switch theme">
       <span data-theme-label>Theme</span>
     </button>
+    <button id="btn-logout" class="btn btn-ghost" type="button"
+            aria-label="Sign out" title="Signed in">Sign out</button>
   </div>
 </header>
 
@@ -50,6 +56,7 @@
   <a class="tab" role="tab" href="#ledger"    data-page="ledger">Ledger</a>
   <a class="tab" role="tab" href="#saved"     data-page="saved">Saved markets<span class="tab-count" id="tab-saved-count"></span></a>
   <a class="tab" role="tab" href="#variables" data-page="variables">Bot variables<span class="tab-count" id="tab-vars-count"></span></a>
+  <span class="tabs-clock" id="tz-clock" aria-hidden="true" title="Every time on this page is GMT+9"></span>
 </nav>
 
 <main class="content">
@@ -57,6 +64,11 @@
   <div id="notice" class="error-box" hidden role="alert"></div>
 
   <section class="page" id="page-market" data-page="market">
+  <div id="idle-other" class="empty-state" hidden>
+    <h2 id="idle-other-title">This bot is not running</h2>
+    <p id="idle-other-detail"></p>
+    <p class="empty-hint">It is run by pm2, not by this page: start or stop it there. Pick another bot above.</p>
+  </div>
   <div id="idle" class="empty-state">
     <h2>Bot is not running</h2>
     <p>
@@ -70,53 +82,131 @@
 
   <div id="live" hidden>
 
+    <!-- the top of the page: the figures on the left, the market charts on the right (the user, 2026-10-05) -->
+    <div class="top-layout">
     <!-- headline -->
     <section class="hero-band" aria-label="Account">
       <div class="hero">
         <p class="hero-label">Equity</p>
         <p class="hero-figure" id="hero-equity">—</p>
+        <div class="hero-split" id="hero-split" aria-label="Cash, positions and portfolio"></div>
         <p class="hero-sub" id="hero-sub"></p>
       </div>
       <div class="kpi-row" id="kpi-row"></div>
     </section>
 
     <!-- market charts -->
-    <section class="card card-wide" id="market-card">
+    <section class="card" id="market-card">
       <div class="card-head">
         <div>
           <p class="eyebrow">Market</p>
-          <h3>One window, three views</h3>
-          <p class="card-sub" id="chart-sub">Where the price sits against the strike, what the market charges for each side, and the raw price path.</p>
+          <h3>One window, two views</h3>
+          <p class="card-sub" id="chart-sub">What the market charges for each side, and the crypto price against the strike.</p>
         </div>
-        <label class="switch" title="Draw the strike distance on the token chart as the Up probability it implies, instead of in its own panel">
-          <input type="checkbox" id="overlay-toggle">
-          <span class="switch-track" aria-hidden="true"></span>
-          <span class="switch-label">Overlay strike distance on token chart</span>
-        </label>
+        <div class="switch-stack">
+          <label class="switch" hidden title="Draw the strike distance on the token chart as the Up probability it implies, instead of in its own panel">
+            <input type="checkbox" id="overlay-toggle">
+            <span class="switch-track" aria-hidden="true"></span>
+            <span class="switch-label">Overlay strike distance on token chart</span>
+          </label>
+          <label class="switch" title="Mark where the crypto trend (a 0.15-sigma swing, confirmed in ~0.5s -- as fast as the price data allows) and the Up token's trend (an 8 c swing, unsmoothed, about one turn per real swing) turned: ▲ turned up, ▼ turned down. The triangle sits where the turn became known -- the moment a rule could act; the small hollow dot is the peak or trough it refers to.">
+            <input type="checkbox" id="turns-toggle">
+            <span class="switch-track" aria-hidden="true"></span>
+            <span class="switch-label">Show trend turns ▲▼</span>
+          </label>
+        </div>
       </div>
       <div class="chips" id="market-picker"></div>
+      <!-- the selected market's position (the user, 2026-10-09): P&L now and if each side wins, shares and cost per token -->
+      <div class="mkt-pos" id="market-position" aria-label="Position in this market" hidden></div>
+      <div class="market-body">
       <div class="chart-grid">
-        <div class="price-col" id="strike-panel">
-          <div class="price-col-head">
-            <h4>Distance from strike</h4>
-            <div class="legend" id="strike-legend"></div>
-          </div>
-          <div class="chart-host" id="strike-chart"></div>
-        </div>
         <div class="price-col" id="price-panel">
           <div class="price-col-head">
             <h4 id="price-panel-title">Token price</h4>
             <div class="legend" id="price-legend"></div>
           </div>
+          <div class="readout" id="price-readout" aria-live="off"></div>
           <div class="chart-host" id="price-chart"></div>
         </div>
-        <div class="price-col price-col-wide">
+        <div class="price-col" id="strike-panel" hidden>
+          <div class="price-col-head">
+            <h4>Distance from strike</h4>
+            <div class="legend" id="strike-legend"></div>
+          </div>
+          <div class="readout" id="strike-readout" aria-live="off"></div>
+          <div class="chart-host" id="strike-chart"></div>
+        </div>
+        <div class="price-col price-col-wide" id="spot-panel">
           <div class="price-col-head">
             <h4>Crypto price</h4>
             <div class="legend" id="spot-legend"></div>
           </div>
+          <div class="readout" id="spot-readout" aria-live="off"></div>
           <div class="chart-host chart-host-mid" id="spot-chart"></div>
         </div>
+      </div>
+      <!-- every order as it is created and as the venue answers (app.js, "the order list") -->
+      <aside class="order-panel" aria-label="Orders">
+        <div class="order-panel-inner">
+          <div class="td-orders-head">
+            <h4>Orders</h4>
+            <div class="buy-panel" title="Buy shares of the selected market on the selected bot, at the ask (fill-and-kill)">
+              <input type="number" id="buy-amount" min="5" step="1" value="10" aria-label="Shares to buy">
+              <div class="seg seg-sm" id="buy-side" role="group" aria-label="Side">
+                <button type="button" class="seg-btn is-on" data-side="UP">Up</button>
+                <button type="button" class="seg-btn" data-side="DOWN">Down</button>
+              </div>
+              <button type="button" id="buy-send" class="btn btn-sm btn-buy">Buy</button>
+            </div>
+            <button type="button" id="sell-all" class="btn btn-sm btn-sell"
+                    title="Sell every token the selected bot holds in the selected market, UP and DOWN, at the bid (fill-and-kill)">Sell all tokens</button>
+            <div class="seg seg-sm" id="orders-scope" role="group" aria-label="Which orders">
+              <button class="seg-btn is-on" type="button" data-scope="all">All markets</button>
+              <button class="seg-btn" type="button" data-scope="market">This market</button>
+            </div>
+          </div>
+          <div class="td-orders-scroll">
+            <table class="data-table order-list" id="orders-table"></table>
+          </div>
+          <p class="order-panel-foot" id="orders-count"></p>
+        </div>
+      </aside>
+      </div>
+    </section>
+    </div>
+
+    <!-- trades -->
+    <section class="card card-wide">
+      <div class="card-head">
+        <div>
+          <p class="eyebrow">Ledger</p>
+          <h3>Trades</h3>
+          <p class="card-sub">Every share bought, at what price, and how it settled. Click a row to open the trade.</p>
+        </div>
+        <button id="copy-trades" class="btn btn-ghost btn-sm" type="button">Copy as CSV</button>
+      </div>
+      <div class="table-scroll">
+        <table class="data-table" id="trades-table"></table>
+      </div>
+      <p class="card-foot" id="trades-note"></p>
+    </section>
+
+    <!-- pair-lock positions (only a pair-lock bot sends the block): matched vs unmatched, never "locked" alone -->
+    <section class="card card-wide" id="pairlock-card" hidden>
+      <div class="card-head">
+        <div>
+          <p class="eyebrow">Pair-lock</p>
+          <h3>Positions, pairs and settlement economics</h3>
+          <p class="card-sub" id="pairlock-sub"></p>
+        </div>
+      </div>
+      <div class="kpi-row" id="pairlock-kpis"></div>
+      <div class="table-scroll">
+        <table class="data-table" id="pairlock-table"></table>
+      </div>
+      <div class="table-scroll">
+        <table class="data-table" id="pairlock-settled"></table>
       </div>
     </section>
 
@@ -163,22 +253,6 @@
       </section>
     </div>
 
-    <!-- trades -->
-    <section class="card card-wide">
-      <div class="card-head">
-        <div>
-          <p class="eyebrow">Ledger</p>
-          <h3>Trades</h3>
-          <p class="card-sub">Every share bought, at what price, and how it settled.</p>
-        </div>
-        <button id="copy-trades" class="btn btn-ghost btn-sm" type="button">Copy as CSV</button>
-      </div>
-      <div class="table-scroll">
-        <table class="data-table" id="trades-table"></table>
-      </div>
-      <p class="card-foot" id="trades-note"></p>
-    </section>
-
   </div>
   </section>
 
@@ -191,12 +265,14 @@
         <p class="eyebrow">On disk &middot; never reset</p>
         <h3>Earnings</h3>
         <p class="card-sub" id="earnings-sub">
-          Realised profit and loss per calendar period, in this machine's timezone.
+          Realised profit and loss per calendar period, on GMT+9 days.
           Paper and real money are recorded separately and never summed.
         </p>
       </div>
       <div class="card-actions">
         <div class="seg" id="earn-period" role="group" aria-label="Period">
+          <button class="seg-btn" type="button" data-period="5m">5 min</button>
+          <button class="seg-btn" type="button" data-period="hour">Hourly</button>
           <button class="seg-btn is-on" type="button" data-period="day">Daily</button>
           <button class="seg-btn" type="button" data-period="week">Weekly</button>
           <button class="seg-btn" type="button" data-period="month">Monthly</button>
@@ -213,6 +289,12 @@
       <div class="legend" id="earnings-legend"></div>
     </div>
     <div class="chart-host" id="earnings-chart"></div>
+    <!-- the balance line: the running total of realised P&L at the end of each period (the user, 2026-10-06) -->
+    <div class="chart-top">
+      <p class="card-sub" id="balance-title">Balance &middot; running total of realised profit and loss at the end of each period</p>
+      <div class="legend" id="balance-legend"></div>
+    </div>
+    <div class="chart-host chart-host-mid" id="balance-chart"></div>
     <p class="card-foot" id="earnings-note"></p>
     <details class="table-fold">
       <summary>Table view</summary>
@@ -235,7 +317,7 @@
         <p class="card-sub" id="history-sub">
           One row per position, with when it was bought and when it was sold or settled.
           A position is often entered in two fills and then exited, which is several
-          events for one trade &mdash; those are folded together here.
+          events for one trade &mdash; those are folded together here. Click a row to open the trade.
         </p>
       </div>
       <div class="card-actions">
@@ -362,9 +444,10 @@
         <p class="eyebrow">Tuning &middot; applies without a restart</p>
         <h3>Bot variables</h3>
         <p class="card-sub">
-          Changes reach a running bot within about two seconds. Values are clamped to
-          safe ranges, and anything the bot cannot apply is reported back rather than
-          silently dropped.
+          Every strategy setting, risk limit and real-money cap. Changes reach a running
+          bot within about two seconds. Values are clamped to safe ranges, settings the
+          bot on screen does not read are greyed out, and anything the bot cannot apply
+          is reported back rather than silently dropped.
         </p>
       </div>
       <div class="card-actions">
@@ -375,6 +458,10 @@
             <option value="paper">Paper bot only</option>
             <option value="live">Real-money bot only</option>
           </select>
+        </label>
+        <label class="ctl-field ctl-check" title="Off: only the settings the selected bot reads are listed. On: every setting, the unused ones greyed out.">
+          <input type="checkbox" id="ctrl-showall">
+          <span>Show all settings</span>
         </label>
         <button id="ctrl-kill" class="btn btn-danger" type="button" aria-pressed="false">Halt orders</button>
       </div>
@@ -393,6 +480,50 @@
   </section>
 
 </main>
+
+<!-- one trade: its window's prices with the orders and fills on it, and the
+     order list beside it. Opened from a trades or ledger row (app.js). -->
+<dialog id="trade-dialog" class="trade-dialog" aria-labelledby="trade-title">
+  <div class="td-inner" tabindex="-1" autofocus>
+    <div class="td-head">
+      <div>
+        <p class="eyebrow" id="trade-eyebrow">Trade</p>
+        <h3 id="trade-title">&mdash;</h3>
+        <p class="card-sub" id="trade-sub"></p>
+      </div>
+      <div class="card-actions">
+        <span class="badge" id="trade-live" data-state="running" hidden>
+          <span class="dot" aria-hidden="true"></span>live
+        </span>
+        <button class="btn btn-sm" id="trade-close" type="button">Close</button>
+      </div>
+    </div>
+    <dl class="td-stats" id="trade-stats"></dl>
+    <div class="td-body">
+      <div class="td-chart-col">
+        <div class="td-chart-head">
+          <div class="readout" id="trade-readout" aria-live="off"></div>
+          <div class="seg" id="trade-zoom" role="group" aria-label="Chart span">
+            <button class="seg-btn is-on" type="button" data-zoom="trade">Trade</button>
+            <button class="seg-btn" type="button" data-zoom="window">Whole window</button>
+          </div>
+        </div>
+        <div class="chart-host" id="trade-chart"></div>
+        <div class="legend" id="trade-legend"></div>
+      </div>
+      <aside class="td-orders" aria-label="Orders on this window">
+        <div class="td-orders-head">
+          <h4>Orders</h4>
+          <span class="td-orders-count" id="trade-orders-count"></span>
+        </div>
+        <div class="td-orders-scroll">
+          <table class="data-table order-list" id="trade-orders"></table>
+        </div>
+      </aside>
+    </div>
+    <p class="card-foot" id="trade-foot"></p>
+  </div>
+</dialog>
 
 <div id="tooltip" class="tooltip" hidden role="status" aria-live="polite"></div>
 

@@ -49,7 +49,10 @@ class OrderBook:
     token_id: str
     bids: list[BookLevel] = field(default_factory=list)
     asks: list[BookLevel] = field(default_factory=list)
+    #: the venue's timestamp on the last change to this book
     ts: float = 0.0
+    #: local (clock-corrected) receipt time of that change; 0 = unknown
+    recv_ts: float = 0.0
 
     @property
     def best_bid(self) -> float | None:
@@ -81,6 +84,7 @@ class OrderBook:
             bids=[BookLevel(l.price, l.size) for l in self.bids],
             asks=[BookLevel(l.price, l.size) for l in self.asks],
             ts=self.ts,
+            recv_ts=self.recv_ts,
         )
 
 
@@ -102,6 +106,30 @@ class Order:
     filled_size: float = 0.0
     filled_notional: float = 0.0
     tag: str = ""
+    #: for a resting (GTC) order: when the strategy stops waiting for it, ms.
+    #: 0 means no deadline. The paper engine expires it; the live adapter
+    #: cancels it at the venue.
+    expires_ts: float = 0.0
+    #: a resting order that must stay a MAKER: never filled as a taker on arrival (the real venue's post_only, which
+    #: execution/polymarket.py sets on every resting order; the paper engine refuses a crossing one the same way)
+    post_only: bool = False
+    # --- the order's own timeline (epoch ms, 0 = not reached) --------------
+    #: T5: the request left for the venue (live: right before POST; paper:
+    #: the simulated departure, i.e. the decision)
+    sent_ts: float = 0.0
+    #: T6: the venue's answer arrived (live: POST returned; paper: simulated)
+    venue_ack_ts: float = 0.0
+    #: T7: the match happened at the venue (live FOK: the POST reply, which
+    #: is synchronous with matching; resting: the poll that saw it; paper:
+    #: the simulated arrival)
+    venue_fill_ts: float = 0.0
+    #: how long signing took before the POST, ms (live only)
+    sign_ms: float = 0.0
+    #: the best ask our book showed at T5, read right before the POST (0 = not read)
+    sent_ask: float = 0.0
+    venue_order_id: str = ""
+    #: the strategy's signal this order came from (paper/shadow/live compare on it)
+    signal_id: str = ""
 
     def __post_init__(self) -> None:
         if not self.order_id:

@@ -12,8 +12,9 @@ that nothing truncates.
 settled window, tagged with the mode that produced it, so paper results and
 real money can be read apart rather than silently summed.
 
-Buckets are calendar buckets in the machine's own timezone: an operator asking
-for "daily" means their day, not a rolling 24 hours from process start. Empty
+Buckets are calendar buckets in the operator's timezone (``tz``; the machine's
+own when none is given): an operator asking for "daily" means their day, not a
+rolling 24 hours from process start, and not the server's UTC day. Empty
 periods inside the range are emitted as zeros, because a week with no trading
 is information and a chart that closes the gap would hide it.
 """
@@ -22,15 +23,15 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, tzinfo
 from pathlib import Path
 from typing import Any, Iterable
 
 EARNINGS_LOG = Path("data/earnings.jsonl")
 
-PERIODS = ("day", "week", "month")
+PERIODS = ("5m", "hour", "day", "week", "month")
 #: How many buckets each period shows by default, newest last.
-DEFAULT_SPAN = {"day": 30, "week": 26, "month": 12}
+DEFAULT_SPAN = {"5m": 144, "hour": 48, "day": 30, "week": 26, "month": 12}
 MAX_SPAN = 400
 SCOPES = ("all", "paper", "live")
 
@@ -96,7 +97,13 @@ def load(path: Path | str | None = None) -> list[Settlement]:
 # ------------------------------------------------------------------ buckets
 
 
-def _bucket_start(d: date, period: str) -> date:
+def _bucket_start(d: datetime, period: str) -> datetime:
+    """The bucket a moment belongs to: the top of its hour, its midnight, its ISO week's Monday, or the 1st."""
+    if period == "5m":
+        return d.replace(minute=d.minute - d.minute % 5, second=0, microsecond=0)   # one Up/Down market
+    if period == "hour":
+        return d.replace(minute=0, second=0, microsecond=0)
+    d = d.replace(hour=0, minute=0, second=0, microsecond=0)
     if period == "week":
         return d - timedelta(days=d.weekday())          # ISO week, Monday
     if period == "month":
@@ -104,15 +111,27 @@ def _bucket_start(d: date, period: str) -> date:
     return d
 
 
-def _next_bucket(d: date, period: str) -> date:
+def _next_bucket(d: datetime, period: str) -> datetime:
+    if period == "5m":
+        return d + timedelta(minutes=5)
+    if period == "hour":
+        return d + timedelta(hours=1)
     if period == "week":
         return d + timedelta(days=7)
     if period == "month":
-        return date(d.year + 1, 1, 1) if d.month == 12 else date(d.year, d.month + 1, 1)
+        return d.replace(year=d.year + 1, month=1) if d.month == 12 else d.replace(month=d.month + 1)
     return d + timedelta(days=1)
 
 
-def _label(d: date, period: str) -> str:
+def _prev_bucket(d: datetime, period: str) -> datetime:
+    return _bucket_start(d - timedelta(seconds=1), period)
+
+
+def _label(d: datetime, period: str) -> str:
+    if period == "5m":
+        return f"{d:%d %b %H:%M}"
+    if period == "hour":
+        return f"{d:%d %b %H}:00"
     if period == "week":
         return f"{d:%d %b}"
     if period == "month":
@@ -120,13 +139,25 @@ def _label(d: date, period: str) -> str:
     return f"{d:%d %b}"
 
 
-def _ms(d: date) -> float:
-    return datetime(d.year, d.month, d.day).timestamp() * 1000.0
+def _key(d: datetime, period: str) -> str:
+    return d.isoformat() if period in ("5m", "hour") else d.date().isoformat()
+
+
+def _ms(d: datetime, tz: tzinfo | None = None) -> float:
+    return d.timestamp() * 1000.0
+
+
+def _day(ts_ms: float, tz: tzinfo | None = None) -> datetime:
+    """The moment as a datetime in ``tz`` (None: the machine's local time, made explicit so buckets compare)."""
+    return datetime.fromtimestamp(ts_ms / 1000.0, tz or datetime.now().astimezone().tzinfo)
 
 
 def aggregate(rows: Iterable[Settlement], period: str = "day", scope: str = "all",
-              span: int | None = None, now: float | None = None) -> dict[str, Any]:
-    """Calendar buckets of realised PnL, newest last, gaps filled with zeros."""
+              span: int | None = None, now: float | None = None,
+              tz: tzinfo | None = None) -> dict[str, Any]:
+    """Calendar buckets of realised PnL, newest last, gaps filled with zeros.
+
+    ``tz`` decides where a day starts; None is the machine's local time."""
     period = period if period in PERIODS else "day"
     scope = scope if scope in SCOPES else "all"
     span = DEFAULT_SPAN[period] if span is None else min(max(int(span), 1), MAX_SPAN)
@@ -134,32 +165,24 @@ def aggregate(rows: Iterable[Settlement], period: str = "day", scope: str = "all
     rows = [r for r in rows
             if scope == "all" or (r.live if scope == "live" else not r.live)]
 
-    totals: dict[date, dict[str, float]] = {}
+    totals: dict[datetime, dict[str, float]] = {}
     for r in rows:
-        key = _bucket_start(r.when.date(), period)
+        key = _bucket_start(_day(r.ts, tz), period)
         b = totals.setdefault(key, {"pnl": 0.0, "trades": 0.0, "wins": 0.0, "losses": 0.0})
         b["pnl"] += r.pnl
         b["trades"] += 1
         b["wins" if r.pnl > 0 else "losses"] += 1
 
-    today = _bucket_start(datetime.fromtimestamp((now or time.time() * 1000.0) / 1000.0).date(), period)
+    today = _bucket_start(_day(now or time.time() * 1000.0, tz), period)
     # walk back `span` buckets from today so the axis ends on the current period
     # even when nothing has settled in it yet
-    edges: list[date] = [today]
+    edges: list[datetime] = [today]
     while len(edges) < span:
-        d = edges[0]
-        prev = (d - timedelta(days=1)) if period == "day" else \
-               (d - timedelta(days=7)) if period == "week" else \
-               _bucket_start((d - timedelta(days=1)), "month")
-        edges.insert(0, prev)
+        edges.insert(0, _prev_bucket(edges[0], period))
     if totals:
         oldest = min(totals)
         while edges[0] > oldest and len(edges) < MAX_SPAN:
-            d = edges[0]
-            prev = (d - timedelta(days=1)) if period == "day" else \
-                   (d - timedelta(days=7)) if period == "week" else \
-                   _bucket_start((d - timedelta(days=1)), "month")
-            edges.insert(0, prev)
+            edges.insert(0, _prev_bucket(edges[0], period))
         edges = edges[-max(span, 1):] if len(edges) > span else edges
 
     buckets = []
@@ -172,10 +195,10 @@ def aggregate(rows: Iterable[Settlement], period: str = "day", scope: str = "all
         b = totals.get(d, {"pnl": 0.0, "trades": 0.0, "wins": 0.0, "losses": 0.0})
         cum += b["pnl"]
         buckets.append({
-            "key": d.isoformat(),
+            "key": _key(d, period),
             "label": _label(d, period),
-            "start_ts": _ms(d),
-            "end_ts": _ms(_next_bucket(d, period)),
+            "start_ts": _ms(d, tz),
+            "end_ts": _ms(_next_bucket(d, period), tz),
             "pnl": round(b["pnl"], 4),
             "cum": round(cum, 4),
             "trades": int(b["trades"]),

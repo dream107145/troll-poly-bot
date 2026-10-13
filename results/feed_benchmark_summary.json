@@ -1,0 +1,2757 @@
+{
+ "recordings": [
+  "feedbench_20260930_184451.jsonl.gz"
+ ],
+ "t0": 1790793893673.3489,
+ "t1": 1790794493476.6875,
+ "minutes": 9.996722310384115,
+ "delivery": {
+  "deribit": {
+   "quotes_per_min": 650.9133491925489,
+   "trades_per_min": 125.94127964244953,
+   "delay_p50": 32.732666015625,
+   "delay_p90": 40.44140625,
+   "delay_p95": 45.6796875,
+   "delay_p99": 78.583984375,
+   "delay_max": 233.29345703125,
+   "stale_pct": 0.0,
+   "dup_pct": 0.0,
+   "ooo_pct": 0.0,
+   "silences": 0
+  },
+  "kraken": {
+   "quotes_per_min": 641.2101687911846,
+   "trades_per_min": 101.9334106081462,
+   "delay_p50": 38.167236328125,
+   "delay_p90": 58.82373046875,
+   "delay_p95": 69.646240234375,
+   "delay_p99": 92.797607421875,
+   "delay_max": 1477.780517578125,
+   "stale_pct": 0.0,
+   "dup_pct": 0.0,
+   "ooo_pct": 0.0028267599946156952,
+   "silences": 0
+  },
+  "bitstamp": {
+   "quotes_per_min": 554.1816435418351,
+   "trades_per_min": 24.40800018487505,
+   "delay_p50": 46.317138671875,
+   "delay_p90": 65.05322265625,
+   "delay_p95": 69.0791015625,
+   "delay_p99": 75.68896484375,
+   "delay_max": 99.46630859375,
+   "stale_pct": 0.0,
+   "dup_pct": 0.0,
+   "ooo_pct": 0.0,
+   "silences": 0
+  },
+  "coinbase_adv": {
+   "quotes_per_min": 285.7936742958525,
+   "trades_per_min": 348.0140682097553,
+   "delay_p50": 67.6533203125,
+   "delay_p90": 69.222412109375,
+   "delay_p95": 69.999755859375,
+   "delay_p99": 75.51513671875,
+   "delay_max": 182.968017578125,
+   "stale_pct": 0.0,
+   "dup_pct": 0.0,
+   "ooo_pct": 0.2351641414141414,
+   "silences": 0
+  },
+  "coinbase": {
+   "quotes_per_min": 338.1108222331052,
+   "trades_per_min": 338.1108222331052,
+   "delay_p50": 70.6318359375,
+   "delay_p90": 81.960693359375,
+   "delay_p95": 95.541259765625,
+   "delay_p99": 161.88671875,
+   "delay_max": 583.525146484375,
+   "stale_pct": 0.0,
+   "dup_pct": 0.0,
+   "ooo_pct": 0.0,
+   "silences": 0
+  },
+  "gemini": {
+   "quotes_per_min": 398.830724332364,
+   "trades_per_min": 12.304032880080454,
+   "delay_p50": 111.42919921875,
+   "delay_p90": 140.71435546875,
+   "delay_p95": 156.227294921875,
+   "delay_p99": 299.618408203125,
+   "delay_max": 363.537353515625,
+   "stale_pct": 0.0,
+   "dup_pct": 0.0,
+   "ooo_pct": 0.0,
+   "silences": 12
+  },
+  "bybit": {
+   "quotes_per_min": 481.85793807599634,
+   "trades_per_min": 591.4938733326481,
+   "delay_p50": 116.744873046875,
+   "delay_p90": 119.550537109375,
+   "delay_p95": 122.3251953125,
+   "delay_p99": 133.406005859375,
+   "delay_max": 1400.6259765625,
+   "stale_pct": 0.0,
+   "dup_pct": 0.0,
+   "ooo_pct": 0.0,
+   "silences": 0
+  },
+  "bybit_linear": {
+   "quotes_per_min": 1186.0887630822272,
+   "trades_per_min": 1011.1314174947418,
+   "delay_p50": 117.3359375,
+   "delay_p90": 118.40185546875,
+   "delay_p95": 119.727294921875,
+   "delay_p99": 131.109375,
+   "delay_max": 345.04736328125,
+   "stale_pct": 0.0,
+   "dup_pct": 0.0,
+   "ooo_pct": 0.0,
+   "silences": 0
+  },
+  "okx_swap": {
+   "quotes_per_min": 1506.293716327248,
+   "trades_per_min": 579.1898404525678,
+   "delay_p50": 147.738037109375,
+   "delay_p90": 152.28125,
+   "delay_p95": 153.52197265625,
+   "delay_p99": 169.45703125,
+   "delay_max": 258.5771484375,
+   "stale_pct": 0.0,
+   "dup_pct": 0.0,
+   "ooo_pct": 0.0,
+   "silences": 0
+  },
+  "okx": {
+   "quotes_per_min": 482.0580036512822,
+   "trades_per_min": 107.23514835322152,
+   "delay_p50": 148.143798828125,
+   "delay_p90": 150.3291015625,
+   "delay_p95": 152.635009765625,
+   "delay_p99": 162.42529296875,
+   "delay_max": 197.119140625,
+   "stale_pct": 0.0,
+   "dup_pct": 0.0,
+   "ooo_pct": 0.0,
+   "silences": 0
+  },
+  "binance": {
+   "quotes_per_min": 6413.702212514134,
+   "trades_per_min": 511.3676104306609,
+   "delay_p50": 151.63916015625,
+   "delay_p90": 237.80859375,
+   "delay_p95": 271.22998046875,
+   "delay_p99": 406.3642578125,
+   "delay_max": 516.03466796875,
+   "stale_pct": 0.0,
+   "dup_pct": 0.0,
+   "ooo_pct": 0.0,
+   "silences": 0
+  },
+  "binance_futures": {
+   "quotes_per_min": 18392.228401604494,
+   "trades_per_min": 0.0,
+   "delay_p50": 177.576171875,
+   "delay_p90": 318.000244140625,
+   "delay_p95": 389.66357421875,
+   "delay_p99": 735.667724609375,
+   "delay_max": 902.35595703125,
+   "stale_pct": 0.0,
+   "dup_pct": 0.0,
+   "ooo_pct": 0.0,
+   "silences": 0
+  },
+  "hyperliquid": {
+   "quotes_per_min": 408.53390473372826,
+   "trades_per_min": 217.77137869865976,
+   "delay_p50": 360.44970703125,
+   "delay_p90": 452.443603515625,
+   "delay_p95": 541.94677734375,
+   "delay_p99": 644.31298828125,
+   "delay_max": 815.40869140625,
+   "stale_pct": 0.00031943778949049674,
+   "dup_pct": 0.0,
+   "ooo_pct": 0.3467497204919342,
+   "silences": 0
+  },
+  "pm_chainlink": {
+   "quotes_per_min": 59.01934470932901,
+   "trades_per_min": 0.0,
+   "delay_p50": 1465.6806640625,
+   "delay_p90": 1913.90966796875,
+   "delay_p95": 2023.388427734375,
+   "delay_p99": 2232.278076171875,
+   "delay_max": 2535.54638671875,
+   "stale_pct": 0.06949152542372881,
+   "dup_pct": 0.0,
+   "ooo_pct": 0.0,
+   "silences": 0
+  }
+ },
+ "events": {
+  "1": {
+   "events": 25,
+   "used": 25,
+   "sources": {
+    "deribit": {
+     "detected": 25,
+     "first_pct": 0.6,
+     "lag_p50": 0.0,
+     "lag_p90": 854.5849609375,
+     "lag_p95": 967.42333984375,
+     "lag_p99": 988.757568359375,
+     "lag_max": 1222.02490234375,
+     "vs_live_p50": -31.783447265625,
+     "vs_binance_p50": -175.7880859375,
+     "missed": 0
+    },
+    "coinbase": {
+     "detected": 25,
+     "first_pct": 0.2,
+     "lag_p50": 197.306640625,
+     "lag_p90": 598.0439453125,
+     "lag_p95": 960.40283203125,
+     "lag_p99": 983.43994140625,
+     "lag_max": 1022.120361328125,
+     "vs_live_p50": null,
+     "vs_binance_p50": -124.81396484375,
+     "missed": 0
+    },
+    "okx": {
+     "detected": 25,
+     "first_pct": 0.04,
+     "lag_p50": 129.60986328125,
+     "lag_p90": 827.109619140625,
+     "lag_p95": 864.018310546875,
+     "lag_p99": 964.68359375,
+     "lag_max": 1241.513916015625,
+     "vs_live_p50": 2.4580078125,
+     "vs_binance_p50": -124.81689453125,
+     "missed": 0
+    },
+    "bybit_linear": {
+     "detected": 25,
+     "first_pct": 0.04,
+     "lag_p50": 136.427978515625,
+     "lag_p90": 516.3916015625,
+     "lag_p95": 1114.4052734375,
+     "lag_p99": 1316.6005859375,
+     "lag_max": 1496.947265625,
+     "vs_live_p50": 47.42333984375,
+     "vs_binance_p50": -50.20556640625,
+     "missed": 0
+    },
+    "bitstamp": {
+     "detected": 22,
+     "first_pct": 0.04,
+     "lag_p50": 253.71728515625,
+     "lag_p90": 1118.31005859375,
+     "lag_p95": 1213.88525390625,
+     "lag_p99": 1344.337646484375,
+     "lag_max": 1648.031494140625,
+     "vs_live_p50": 92.393310546875,
+     "vs_binance_p50": 9.6689453125,
+     "missed": 3
+    },
+    "kraken": {
+     "detected": 25,
+     "first_pct": 0.04,
+     "lag_p50": 254.235107421875,
+     "lag_p90": 620.885009765625,
+     "lag_p95": 1016.573974609375,
+     "lag_p99": 1070.43115234375,
+     "lag_max": 1311.38720703125,
+     "vs_live_p50": 147.12744140625,
+     "vs_binance_p50": 96.243896484375,
+     "missed": 0
+    },
+    "hyperliquid": {
+     "detected": 22,
+     "first_pct": 0.04,
+     "lag_p50": 898.648681640625,
+     "lag_p90": 1205.976806640625,
+     "lag_p95": 1512.463623046875,
+     "lag_p99": 1879.741455078125,
+     "lag_max": 1899.060791015625,
+     "vs_live_p50": 735.861328125,
+     "vs_binance_p50": 700.095947265625,
+     "missed": 3
+    },
+    "bybit": {
+     "detected": 25,
+     "first_pct": 0.0,
+     "lag_p50": 156.86376953125,
+     "lag_p90": 478.610595703125,
+     "lag_p95": 963.87646484375,
+     "lag_p99": 1265.368408203125,
+     "lag_max": 1265.37060546875,
+     "vs_live_p50": 15.907958984375,
+     "vs_binance_p50": -116.69921875,
+     "missed": 0
+    },
+    "okx_swap": {
+     "detected": 23,
+     "first_pct": 0.0,
+     "lag_p50": 177.182373046875,
+     "lag_p90": 966.501953125,
+     "lag_p95": 972.054443359375,
+     "lag_p99": 1298.70361328125,
+     "lag_max": 1365.55224609375,
+     "vs_live_p50": 44.97216796875,
+     "vs_binance_p50": -25.787841796875,
+     "missed": 2
+    },
+    "gemini": {
+     "detected": 23,
+     "first_pct": 0.0,
+     "lag_p50": 201.159912109375,
+     "lag_p90": 834.79345703125,
+     "lag_p95": 898.283935546875,
+     "lag_p99": 1000.01220703125,
+     "lag_max": 1683.970947265625,
+     "vs_live_p50": 82.44580078125,
+     "vs_binance_p50": -20.094482421875,
+     "missed": 2
+    },
+    "binance": {
+     "detected": 21,
+     "first_pct": 0.0,
+     "lag_p50": 223.079345703125,
+     "lag_p90": 985.302734375,
+     "lag_p95": 1245.54736328125,
+     "lag_p99": 1245.54736328125,
+     "lag_max": 1397.81298828125,
+     "vs_live_p50": 124.81396484375,
+     "vs_binance_p50": null,
+     "missed": 4
+    },
+    "coinbase_adv": {
+     "detected": 25,
+     "first_pct": 0.0,
+     "lag_p50": 285.209716796875,
+     "lag_p90": 631.970458984375,
+     "lag_p95": 664.18798828125,
+     "lag_p99": 1188.6640625,
+     "lag_max": 1358.035400390625,
+     "vs_live_p50": 164.128173828125,
+     "vs_binance_p50": 66.381591796875,
+     "missed": 0
+    },
+    "binance_futures": {
+     "detected": 25,
+     "first_pct": 0.0,
+     "lag_p50": 297.031005859375,
+     "lag_p90": 524.885986328125,
+     "lag_p95": 1025.19677734375,
+     "lag_p99": 1235.472412109375,
+     "lag_max": 1272.28125,
+     "vs_live_p50": 119.67529296875,
+     "vs_binance_p50": 14.27099609375,
+     "missed": 0
+    }
+   }
+  },
+  "2": {
+   "events": 7,
+   "used": 7,
+   "sources": {
+    "coinbase": {
+     "detected": 7,
+     "first_pct": 0.42857142857142855,
+     "lag_p50": 36.5146484375,
+     "lag_p90": 479.462890625,
+     "lag_p95": 479.462890625,
+     "lag_p99": 479.462890625,
+     "lag_max": 588.2841796875,
+     "vs_live_p50": null,
+     "vs_binance_p50": -178.757568359375,
+     "missed": 0
+    },
+    "deribit": {
+     "detected": 7,
+     "first_pct": 0.14285714285714285,
+     "lag_p50": 34.489501953125,
+     "lag_p90": 157.136962890625,
+     "lag_p95": 157.136962890625,
+     "lag_p99": 157.136962890625,
+     "lag_max": 638.99169921875,
+     "vs_live_p50": 1.345703125,
+     "vs_binance_p50": -128.050048828125,
+     "missed": 0
+    },
+    "gemini": {
+     "detected": 7,
+     "first_pct": 0.14285714285714285,
+     "lag_p50": 170.1728515625,
+     "lag_p90": 789.526611328125,
+     "lag_p95": 789.526611328125,
+     "lag_p99": 789.526611328125,
+     "lag_max": 819.643310546875,
+     "vs_live_p50": 154.244384765625,
+     "vs_binance_p50": -8.561767578125,
+     "missed": 0
+    },
+    "kraken": {
+     "detected": 7,
+     "first_pct": 0.14285714285714285,
+     "lag_p50": 284.748779296875,
+     "lag_p90": 334.7880859375,
+     "lag_p95": 334.7880859375,
+     "lag_p99": 334.7880859375,
+     "lag_max": 856.534912109375,
+     "vs_live_p50": 173.681884765625,
+     "vs_binance_p50": -14.1611328125,
+     "missed": 0
+    },
+    "hyperliquid": {
+     "detected": 5,
+     "first_pct": 0.14285714285714285,
+     "lag_p50": 845.530517578125,
+     "lag_p90": 913.105712890625,
+     "lag_p95": 913.105712890625,
+     "lag_p99": 913.105712890625,
+     "lag_max": 1459.397216796875,
+     "vs_live_p50": 845.530517578125,
+     "vs_binance_p50": 541.990234375,
+     "missed": 2
+    },
+    "okx": {
+     "detected": 7,
+     "first_pct": 0.0,
+     "lag_p50": 116.332763671875,
+     "lag_p90": 268.729736328125,
+     "lag_p95": 268.729736328125,
+     "lag_p99": 268.729736328125,
+     "lag_max": 710.69140625,
+     "vs_live_p50": 57.591796875,
+     "vs_binance_p50": -67.22216796875,
+     "missed": 0
+    },
+    "bybit_linear": {
+     "detected": 7,
+     "first_pct": 0.0,
+     "lag_p50": 123.3505859375,
+     "lag_p90": 219.76611328125,
+     "lag_p95": 219.76611328125,
+     "lag_p99": 219.76611328125,
+     "lag_max": 701.8974609375,
+     "vs_live_p50": 59.315673828125,
+     "vs_binance_p50": -65.498291015625,
+     "missed": 0
+    },
+    "binance": {
+     "detected": 6,
+     "first_pct": 0.0,
+     "lag_p50": 124.81396484375,
+     "lag_p90": 463.292724609375,
+     "lag_p95": 463.292724609375,
+     "lag_p99": 463.292724609375,
+     "lag_max": 767.041748046875,
+     "vs_live_p50": 124.81396484375,
+     "vs_binance_p50": null,
+     "missed": 1
+    },
+    "bybit": {
+     "detected": 7,
+     "first_pct": 0.0,
+     "lag_p50": 195.04931640625,
+     "lag_p90": 209.818115234375,
+     "lag_p95": 209.818115234375,
+     "lag_p99": 209.818115234375,
+     "lag_max": 693.05810546875,
+     "vs_live_p50": 48.156005859375,
+     "vs_binance_p50": -116.69921875,
+     "missed": 0
+    },
+    "okx_swap": {
+     "detected": 7,
+     "first_pct": 0.0,
+     "lag_p50": 205.140625,
+     "lag_p90": 779.11865234375,
+     "lag_p95": 779.11865234375,
+     "lag_p99": 779.11865234375,
+     "lag_max": 1567.900390625,
+     "vs_live_p50": 142.588623046875,
+     "vs_binance_p50": -25.787841796875,
+     "missed": 0
+    },
+    "coinbase_adv": {
+     "detected": 7,
+     "first_pct": 0.0,
+     "lag_p50": 243.008056640625,
+     "lag_p90": 553.986328125,
+     "lag_p95": 553.986328125,
+     "lag_p99": 553.986328125,
+     "lag_max": 819.371337890625,
+     "vs_live_p50": 219.376708984375,
+     "vs_binance_p50": 52.32958984375,
+     "missed": 0
+    },
+    "bitstamp": {
+     "detected": 7,
+     "first_pct": 0.0,
+     "lag_p50": 312.84130859375,
+     "lag_p90": 784.736328125,
+     "lag_p95": 784.736328125,
+     "lag_p99": 784.736328125,
+     "lag_max": 1594.1591796875,
+     "vs_live_p50": 196.4521484375,
+     "vs_binance_p50": -51.553466796875,
+     "missed": 0
+    },
+    "binance_futures": {
+     "detected": 7,
+     "first_pct": 0.0,
+     "lag_p50": 340.713134765625,
+     "lag_p90": 719.08642578125,
+     "lag_p95": 719.08642578125,
+     "lag_p99": 719.08642578125,
+     "lag_max": 879.543701171875,
+     "vs_live_p50": 261.45849609375,
+     "vs_binance_p50": 14.61572265625,
+     "missed": 0
+    }
+   }
+  }
+ },
+ "regime": {
+  "share": {
+   "all 2 bp": {
+    "deribit": 0.14285714285714285,
+    "bitstamp": 0.0,
+    "gemini": 0.14285714285714285,
+    "coinbase": 0.42857142857142855,
+    "coinbase_adv": 0.0,
+    "bybit": 0.0,
+    "binance": 0.0,
+    "hyperliquid": 0.14285714285714285,
+    "binance_futures": 0.0,
+    "bybit_linear": 0.0,
+    "kraken": 0.14285714285714285,
+    "okx_swap": 0.0,
+    "okx": 0.0,
+    "_n": 7
+   },
+   "up 2 bp": {
+    "deribit": 0.25,
+    "bitstamp": 0.0,
+    "gemini": 0.0,
+    "coinbase": 0.5,
+    "coinbase_adv": 0.0,
+    "bybit": 0.0,
+    "binance": 0.0,
+    "hyperliquid": 0.0,
+    "binance_futures": 0.0,
+    "bybit_linear": 0.0,
+    "kraken": 0.25,
+    "okx_swap": 0.0,
+    "okx": 0.0,
+    "_n": 4
+   },
+   "down 2 bp": {
+    "deribit": 0.0,
+    "bitstamp": 0.0,
+    "gemini": 0.3333333333333333,
+    "coinbase": 0.3333333333333333,
+    "coinbase_adv": 0.0,
+    "bybit": 0.0,
+    "binance": 0.0,
+    "hyperliquid": 0.3333333333333333,
+    "binance_futures": 0.0,
+    "bybit_linear": 0.0,
+    "kraken": 0.0,
+    "okx_swap": 0.0,
+    "okx": 0.0,
+    "_n": 3
+   },
+   "small (1\u20132 bp)": {
+    "deribit": 0.625,
+    "bitstamp": 0.041666666666666664,
+    "gemini": 0.0,
+    "coinbase": 0.16666666666666666,
+    "coinbase_adv": 0.0,
+    "bybit": 0.0,
+    "binance": 0.0,
+    "hyperliquid": 0.041666666666666664,
+    "binance_futures": 0.0,
+    "bybit_linear": 0.041666666666666664,
+    "kraken": 0.041666666666666664,
+    "okx_swap": 0.0,
+    "okx": 0.041666666666666664,
+    "_n": 24
+   },
+   "large (\u2265 5 bp)": {
+    "deribit": NaN,
+    "bitstamp": NaN,
+    "gemini": NaN,
+    "coinbase": NaN,
+    "coinbase_adv": NaN,
+    "bybit": NaN,
+    "binance": NaN,
+    "hyperliquid": NaN,
+    "binance_futures": NaN,
+    "bybit_linear": NaN,
+    "kraken": NaN,
+    "okx_swap": NaN,
+    "okx": NaN,
+    "_n": 0
+   },
+   "low vol": {
+    "deribit": 0.0,
+    "bitstamp": 0.0,
+    "gemini": 0.5,
+    "coinbase": 0.5,
+    "coinbase_adv": 0.0,
+    "bybit": 0.0,
+    "binance": 0.0,
+    "hyperliquid": 0.0,
+    "binance_futures": 0.0,
+    "bybit_linear": 0.0,
+    "kraken": 0.0,
+    "okx_swap": 0.0,
+    "okx": 0.0,
+    "_n": 2
+   },
+   "mid vol": {
+    "deribit": 0.3333333333333333,
+    "bitstamp": 0.0,
+    "gemini": 0.0,
+    "coinbase": 0.3333333333333333,
+    "coinbase_adv": 0.0,
+    "bybit": 0.0,
+    "binance": 0.0,
+    "hyperliquid": 0.3333333333333333,
+    "binance_futures": 0.0,
+    "bybit_linear": 0.0,
+    "kraken": 0.0,
+    "okx_swap": 0.0,
+    "okx": 0.0,
+    "_n": 3
+   },
+   "high vol": {
+    "deribit": 0.0,
+    "bitstamp": 0.0,
+    "gemini": 0.0,
+    "coinbase": 0.5,
+    "coinbase_adv": 0.0,
+    "bybit": 0.0,
+    "binance": 0.0,
+    "hyperliquid": 0.0,
+    "binance_futures": 0.0,
+    "bybit_linear": 0.0,
+    "kraken": 0.5,
+    "okx_swap": 0.0,
+    "okx": 0.0,
+    "_n": 2
+   },
+   "first half": {
+    "deribit": 0.0,
+    "bitstamp": 0.0,
+    "gemini": 0.5,
+    "coinbase": 0.5,
+    "coinbase_adv": 0.0,
+    "bybit": 0.0,
+    "binance": 0.0,
+    "hyperliquid": 0.0,
+    "binance_futures": 0.0,
+    "bybit_linear": 0.0,
+    "kraken": 0.0,
+    "okx_swap": 0.0,
+    "okx": 0.0,
+    "_n": 2
+   },
+   "second half": {
+    "deribit": 0.2,
+    "bitstamp": 0.0,
+    "gemini": 0.0,
+    "coinbase": 0.4,
+    "coinbase_adv": 0.0,
+    "bybit": 0.0,
+    "binance": 0.0,
+    "hyperliquid": 0.2,
+    "binance_futures": 0.0,
+    "bybit_linear": 0.0,
+    "kraken": 0.2,
+    "okx_swap": 0.0,
+    "okx": 0.0,
+    "_n": 5
+   },
+   "DEV": {
+    "deribit": 0.0,
+    "bitstamp": 0.0,
+    "gemini": 0.5,
+    "coinbase": 0.5,
+    "coinbase_adv": 0.0,
+    "bybit": 0.0,
+    "binance": 0.0,
+    "hyperliquid": 0.0,
+    "binance_futures": 0.0,
+    "bybit_linear": 0.0,
+    "kraken": 0.0,
+    "okx_swap": 0.0,
+    "okx": 0.0,
+    "_n": 2
+   },
+   "TEST": {
+    "deribit": 0.0,
+    "bitstamp": 0.0,
+    "gemini": 0.0,
+    "coinbase": 0.0,
+    "coinbase_adv": 0.0,
+    "bybit": 0.0,
+    "binance": 0.0,
+    "hyperliquid": 0.0,
+    "binance_futures": 0.0,
+    "bybit_linear": 0.0,
+    "kraken": 1.0,
+    "okx_swap": 0.0,
+    "okx": 0.0,
+    "_n": 1
+   }
+  },
+  "median_lag": {
+   "all 2 bp": {
+    "deribit": 34.489501953125,
+    "bitstamp": 312.84130859375,
+    "gemini": 170.1728515625,
+    "coinbase": 36.5146484375,
+    "coinbase_adv": 243.008056640625,
+    "bybit": 195.04931640625,
+    "binance": 124.81396484375,
+    "hyperliquid": 845.530517578125,
+    "binance_futures": 340.713134765625,
+    "bybit_linear": 123.3505859375,
+    "kraken": 284.748779296875,
+    "okx_swap": 205.140625,
+    "okx": 116.332763671875
+   },
+   "up 2 bp": {
+    "deribit": 1.345703125,
+    "bitstamp": 158.525390625,
+    "gemini": 170.1728515625,
+    "coinbase": 0.0,
+    "coinbase_adv": 219.376708984375,
+    "bybit": 17.494873046875,
+    "binance": 96.552734375,
+    "hyperliquid": 913.105712890625,
+    "binance_futures": 32.910888671875,
+    "bybit_linear": 56.655517578125,
+    "kraken": 169.452392578125,
+    "okx_swap": 99.026123046875,
+    "okx": 57.591796875
+   },
+   "down 2 bp": {
+    "deribit": 157.136962890625,
+    "bitstamp": 380.555908203125,
+    "gemini": 154.244384765625,
+    "coinbase": 161.662109375,
+    "coinbase_adv": 243.008056640625,
+    "bybit": 209.818115234375,
+    "binance": 463.292724609375,
+    "hyperliquid": 497.302978515625,
+    "binance_futures": 719.08642578125,
+    "bybit_linear": 219.76611328125,
+    "kraken": 334.7880859375,
+    "okx_swap": 385.883056640625,
+    "okx": 117.5009765625
+   },
+   "small (1\u20132 bp)": {
+    "deribit": 0.0,
+    "bitstamp": 316.74853515625,
+    "gemini": 201.159912109375,
+    "coinbase": 197.306640625,
+    "coinbase_adv": 285.209716796875,
+    "bybit": 156.86376953125,
+    "binance": 223.079345703125,
+    "hyperliquid": 898.648681640625,
+    "binance_futures": 297.031005859375,
+    "bybit_linear": 136.427978515625,
+    "kraken": 240.32568359375,
+    "okx_swap": 177.182373046875,
+    "okx": 129.60986328125
+   },
+   "large (\u2265 5 bp)": {
+    "deribit": NaN,
+    "bitstamp": NaN,
+    "gemini": NaN,
+    "coinbase": NaN,
+    "coinbase_adv": NaN,
+    "bybit": NaN,
+    "binance": NaN,
+    "hyperliquid": NaN,
+    "binance_futures": NaN,
+    "bybit_linear": NaN,
+    "kraken": NaN,
+    "okx_swap": NaN,
+    "okx": NaN
+   },
+   "low vol": {
+    "deribit": 1.345703125,
+    "bitstamp": 49.881103515625,
+    "gemini": 0.0,
+    "coinbase": 0.0,
+    "coinbase_adv": 161.169921875,
+    "bybit": 8.11474609375,
+    "binance": 124.81396484375,
+    "hyperliquid": 497.302978515625,
+    "binance_futures": 19.6865234375,
+    "bybit_linear": 59.315673828125,
+    "kraken": 284.748779296875,
+    "okx_swap": 99.026123046875,
+    "okx": 57.591796875
+   },
+   "mid vol": {
+    "deribit": 34.489501953125,
+    "bitstamp": 784.736328125,
+    "gemini": 208.721923828125,
+    "coinbase": 36.5146484375,
+    "coinbase_adv": 326.8818359375,
+    "bybit": 196.537841796875,
+    "binance": 18.295166015625,
+    "hyperliquid": 0.0,
+    "binance_futures": 485.13916015625,
+    "bybit_linear": 123.3505859375,
+    "kraken": 173.681884765625,
+    "okx_swap": 779.11865234375,
+    "okx": 116.332763671875
+   },
+   "high vol": {
+    "deribit": 3.362548828125,
+    "bitstamp": 251.98681640625,
+    "gemini": 154.244384765625,
+    "coinbase": 0.0,
+    "coinbase_adv": 243.008056640625,
+    "bybit": 119.011962890625,
+    "binance": 96.552734375,
+    "hyperliquid": 845.530517578125,
+    "binance_futures": 261.45849609375,
+    "bybit_linear": 56.496826171875,
+    "kraken": 0.0,
+    "okx_swap": 142.588623046875,
+    "okx": 117.5009765625
+   },
+   "first half": {
+    "deribit": 1.345703125,
+    "bitstamp": 49.881103515625,
+    "gemini": 0.0,
+    "coinbase": 0.0,
+    "coinbase_adv": 161.169921875,
+    "bybit": 8.11474609375,
+    "binance": 124.81396484375,
+    "hyperliquid": 497.302978515625,
+    "binance_futures": 19.6865234375,
+    "bybit_linear": 59.315673828125,
+    "kraken": 284.748779296875,
+    "okx_swap": 99.026123046875,
+    "okx": 57.591796875
+   },
+   "second half": {
+    "deribit": 34.489501953125,
+    "bitstamp": 312.84130859375,
+    "gemini": 208.721923828125,
+    "coinbase": 36.5146484375,
+    "coinbase_adv": 326.8818359375,
+    "bybit": 195.04931640625,
+    "binance": 96.552734375,
+    "hyperliquid": 845.530517578125,
+    "binance_futures": 340.713134765625,
+    "bybit_linear": 123.3505859375,
+    "kraken": 173.681884765625,
+    "okx_swap": 205.140625,
+    "okx": 117.5009765625
+   },
+   "DEV": {
+    "deribit": 1.345703125,
+    "bitstamp": 49.881103515625,
+    "gemini": 0.0,
+    "coinbase": 0.0,
+    "coinbase_adv": 161.169921875,
+    "bybit": 8.11474609375,
+    "binance": 124.81396484375,
+    "hyperliquid": 497.302978515625,
+    "binance_futures": 19.6865234375,
+    "bybit_linear": 59.315673828125,
+    "kraken": 284.748779296875,
+    "okx_swap": 99.026123046875,
+    "okx": 57.591796875
+   },
+   "TEST": {
+    "deribit": 3.362548828125,
+    "bitstamp": 312.84130859375,
+    "gemini": 789.526611328125,
+    "coinbase": 479.462890625,
+    "coinbase_adv": 553.986328125,
+    "bybit": 195.04931640625,
+    "binance": 96.552734375,
+    "hyperliquid": 1459.397216796875,
+    "binance_futures": 340.713134765625,
+    "bybit_linear": 56.496826171875,
+    "kraken": 0.0,
+    "okx_swap": 205.140625,
+    "okx": 268.729736328125
+   }
+  },
+  "top": [
+   "coinbase",
+   "deribit",
+   "gemini",
+   "hyperliquid",
+   "kraken",
+   "bitstamp",
+   "coinbase_adv",
+   "bybit"
+  ]
+ },
+ "rolling": [
+  {
+   "start": "2026-09-30 18:44 UTC",
+   "n": 7,
+   "coinbase": 0.42857142857142855,
+   "deribit": 0.14285714285714285,
+   "gemini": 0.14285714285714285,
+   "hyperliquid": 0.14285714285714285,
+   "kraken": 0.14285714285714285,
+   "bitstamp": 0.0
+  }
+ ],
+ "predictive": {
+  "own_shocks": {
+   "binance@1": {
+    "dev": {
+     "n": 7,
+     "same_sign": 0.7142857142857143,
+     "confirmed": 1.0,
+     "lead_p50": 100.0
+    },
+    "test": {
+     "n": 3,
+     "same_sign": 1.0,
+     "confirmed": 0.6666666666666666,
+     "lead_p50": -200.0
+    }
+   },
+   "binance@2": {
+    "dev": {
+     "n": 2,
+     "same_sign": 1.0,
+     "confirmed": 0.5,
+     "lead_p50": 250.0
+    },
+    "test": {
+     "n": 1,
+     "same_sign": 1.0,
+     "confirmed": 1.0,
+     "lead_p50": -100.0
+    }
+   },
+   "binance@5": {
+    "dev": {
+     "n": 0,
+     "same_sign": NaN,
+     "confirmed": NaN,
+     "lead_p50": NaN
+    },
+    "test": {
+     "n": 0,
+     "same_sign": NaN,
+     "confirmed": NaN,
+     "lead_p50": NaN
+    }
+   },
+   "binance_futures@1": {
+    "dev": {
+     "n": 8,
+     "same_sign": 0.625,
+     "confirmed": 1.0,
+     "lead_p50": 0.0
+    },
+    "test": {
+     "n": 5,
+     "same_sign": 0.8,
+     "confirmed": 0.8,
+     "lead_p50": -50.0
+    }
+   },
+   "binance_futures@2": {
+    "dev": {
+     "n": 2,
+     "same_sign": 1.0,
+     "confirmed": 1.0,
+     "lead_p50": 200.0
+    },
+    "test": {
+     "n": 2,
+     "same_sign": 1.0,
+     "confirmed": 0.0,
+     "lead_p50": NaN
+    }
+   },
+   "binance_futures@5": {
+    "dev": {
+     "n": 0,
+     "same_sign": NaN,
+     "confirmed": NaN,
+     "lead_p50": NaN
+    },
+    "test": {
+     "n": 0,
+     "same_sign": NaN,
+     "confirmed": NaN,
+     "lead_p50": NaN
+    }
+   },
+   "bitstamp@1": {
+    "dev": {
+     "n": 8,
+     "same_sign": 0.875,
+     "confirmed": 1.0,
+     "lead_p50": -50.0
+    },
+    "test": {
+     "n": 8,
+     "same_sign": 0.5,
+     "confirmed": 0.5,
+     "lead_p50": 50.0
+    }
+   },
+   "bitstamp@2": {
+    "dev": {
+     "n": 2,
+     "same_sign": 1.0,
+     "confirmed": 1.0,
+     "lead_p50": 0.0
+    },
+    "test": {
+     "n": 1,
+     "same_sign": 1.0,
+     "confirmed": 1.0,
+     "lead_p50": 100.0
+    }
+   },
+   "bitstamp@5": {
+    "dev": {
+     "n": 0,
+     "same_sign": NaN,
+     "confirmed": NaN,
+     "lead_p50": NaN
+    },
+    "test": {
+     "n": 0,
+     "same_sign": NaN,
+     "confirmed": NaN,
+     "lead_p50": NaN
+    }
+   },
+   "bybit@1": {
+    "dev": {
+     "n": 6,
+     "same_sign": 1.0,
+     "confirmed": 1.0,
+     "lead_p50": -50.0
+    },
+    "test": {
+     "n": 5,
+     "same_sign": 1.0,
+     "confirmed": 0.8,
+     "lead_p50": -350.0
+    }
+   },
+   "bybit@2": {
+    "dev": {
+     "n": 2,
+     "same_sign": 1.0,
+     "confirmed": 1.0,
+     "lead_p50": -150.0
+    },
+    "test": {
+     "n": 1,
+     "same_sign": 1.0,
+     "confirmed": 0.0,
+     "lead_p50": NaN
+    }
+   },
+   "bybit@5": {
+    "dev": {
+     "n": 0,
+     "same_sign": NaN,
+     "confirmed": NaN,
+     "lead_p50": NaN
+    },
+    "test": {
+     "n": 0,
+     "same_sign": NaN,
+     "confirmed": NaN,
+     "lead_p50": NaN
+    }
+   },
+   "bybit_linear@1": {
+    "dev": {
+     "n": 15,
+     "same_sign": 0.9333333333333333,
+     "confirmed": 0.6,
+     "lead_p50": -150.0
+    },
+    "test": {
+     "n": 6,
+     "same_sign": 0.8333333333333334,
+     "confirmed": 0.6666666666666666,
+     "lead_p50": -250.0
+    }
+   },
+   "bybit_linear@2": {
+    "dev": {
+     "n": 2,
+     "same_sign": 1.0,
+     "confirmed": 1.0,
+     "lead_p50": -150.0
+    },
+    "test": {
+     "n": 2,
+     "same_sign": 1.0,
+     "confirmed": 0.5,
+     "lead_p50": 150.0
+    }
+   },
+   "bybit_linear@5": {
+    "dev": {
+     "n": 0,
+     "same_sign": NaN,
+     "confirmed": NaN,
+     "lead_p50": NaN
+    },
+    "test": {
+     "n": 0,
+     "same_sign": NaN,
+     "confirmed": NaN,
+     "lead_p50": NaN
+    }
+   },
+   "coinbase@1": {
+    "dev": {
+     "n": 17,
+     "same_sign": 0.8235294117647058,
+     "confirmed": 0.5882352941176471,
+     "lead_p50": -100.0
+    },
+    "test": {
+     "n": 8,
+     "same_sign": 0.75,
+     "confirmed": 0.5,
+     "lead_p50": 0.0
+    }
+   },
+   "coinbase@2": {
+    "dev": {
+     "n": 2,
+     "same_sign": 1.0,
+     "confirmed": 1.0,
+     "lead_p50": -200.0
+    },
+    "test": {
+     "n": 2,
+     "same_sign": 1.0,
+     "confirmed": 0.5,
+     "lead_p50": 100.0
+    }
+   },
+   "coinbase@5": {
+    "dev": {
+     "n": 0,
+     "same_sign": NaN,
+     "confirmed": NaN,
+     "lead_p50": NaN
+    },
+    "test": {
+     "n": 0,
+     "same_sign": NaN,
+     "confirmed": NaN,
+     "lead_p50": NaN
+    }
+   },
+   "coinbase_adv@1": {
+    "dev": {
+     "n": 17,
+     "same_sign": 0.6470588235294118,
+     "confirmed": 0.5882352941176471,
+     "lead_p50": 0.0
+    },
+    "test": {
+     "n": 8,
+     "same_sign": 0.875,
+     "confirmed": 0.5,
+     "lead_p50": -100.0
+    }
+   },
+   "coinbase_adv@2": {
+    "dev": {
+     "n": 2,
+     "same_sign": 1.0,
+     "confirmed": 1.0,
+     "lead_p50": 0.0
+    },
+    "test": {
+     "n": 2,
+     "same_sign": 1.0,
+     "confirmed": 0.5,
+     "lead_p50": 200.0
+    }
+   },
+   "coinbase_adv@5": {
+    "dev": {
+     "n": 0,
+     "same_sign": NaN,
+     "confirmed": NaN,
+     "lead_p50": NaN
+    },
+    "test": {
+     "n": 0,
+     "same_sign": NaN,
+     "confirmed": NaN,
+     "lead_p50": NaN
+    }
+   },
+   "deribit@1": {
+    "dev": {
+     "n": 18,
+     "same_sign": 0.8888888888888888,
+     "confirmed": 0.6111111111111112,
+     "lead_p50": -200.0
+    },
+    "test": {
+     "n": 10,
+     "same_sign": 0.5,
+     "confirmed": 0.3,
+     "lead_p50": -400.0
+    }
+   },
+   "deribit@2": {
+    "dev": {
+     "n": 4,
+     "same_sign": 1.0,
+     "confirmed": 0.5,
+     "lead_p50": -200.0
+    },
+    "test": {
+     "n": 3,
+     "same_sign": 1.0,
+     "confirmed": 0.3333333333333333,
+     "lead_p50": -300.0
+    }
+   },
+   "deribit@5": {
+    "dev": {
+     "n": 0,
+     "same_sign": NaN,
+     "confirmed": NaN,
+     "lead_p50": NaN
+    },
+    "test": {
+     "n": 0,
+     "same_sign": NaN,
+     "confirmed": NaN,
+     "lead_p50": NaN
+    }
+   },
+   "gemini@1": {
+    "dev": {
+     "n": 12,
+     "same_sign": 0.9166666666666666,
+     "confirmed": 0.6666666666666666,
+     "lead_p50": -150.0
+    },
+    "test": {
+     "n": 4,
+     "same_sign": 1.0,
+     "confirmed": 0.75,
+     "lead_p50": 50.0
+    }
+   },
+   "gemini@2": {
+    "dev": {
+     "n": 3,
+     "same_sign": 0.6666666666666666,
+     "confirmed": 0.3333333333333333,
+     "lead_p50": 0.0
+    },
+    "test": {
+     "n": 1,
+     "same_sign": 1.0,
+     "confirmed": 0.0,
+     "lead_p50": NaN
+    }
+   },
+   "gemini@5": {
+    "dev": {
+     "n": 0,
+     "same_sign": NaN,
+     "confirmed": NaN,
+     "lead_p50": NaN
+    },
+    "test": {
+     "n": 0,
+     "same_sign": NaN,
+     "confirmed": NaN,
+     "lead_p50": NaN
+    }
+   },
+   "hyperliquid@1": {
+    "dev": {
+     "n": 8,
+     "same_sign": 0.5,
+     "confirmed": 0.75,
+     "lead_p50": 450.0
+    },
+    "test": {
+     "n": 6,
+     "same_sign": 0.6666666666666666,
+     "confirmed": 0.6666666666666666,
+     "lead_p50": 850.0
+    }
+   },
+   "hyperliquid@2": {
+    "dev": {
+     "n": 4,
+     "same_sign": 0.75,
+     "confirmed": 0.25,
+     "lead_p50": 100.0
+    },
+    "test": {
+     "n": 2,
+     "same_sign": 0.5,
+     "confirmed": 0.5,
+     "lead_p50": 850.0
+    }
+   },
+   "hyperliquid@5": {
+    "dev": {
+     "n": 0,
+     "same_sign": NaN,
+     "confirmed": NaN,
+     "lead_p50": NaN
+    },
+    "test": {
+     "n": 0,
+     "same_sign": NaN,
+     "confirmed": NaN,
+     "lead_p50": NaN
+    }
+   },
+   "kraken@1": {
+    "dev": {
+     "n": 11,
+     "same_sign": 0.9090909090909091,
+     "confirmed": 0.8181818181818182,
+     "lead_p50": 0.0
+    },
+    "test": {
+     "n": 3,
+     "same_sign": 1.0,
+     "confirmed": 0.6666666666666666,
+     "lead_p50": -300.0
+    }
+   },
+   "kraken@2": {
+    "dev": {
+     "n": 2,
+     "same_sign": 1.0,
+     "confirmed": 1.0,
+     "lead_p50": 50.0
+    },
+    "test": {
+     "n": 1,
+     "same_sign": 1.0,
+     "confirmed": 1.0,
+     "lead_p50": -250.0
+    }
+   },
+   "kraken@5": {
+    "dev": {
+     "n": 0,
+     "same_sign": NaN,
+     "confirmed": NaN,
+     "lead_p50": NaN
+    },
+    "test": {
+     "n": 0,
+     "same_sign": NaN,
+     "confirmed": NaN,
+     "lead_p50": NaN
+    }
+   },
+   "okx@1": {
+    "dev": {
+     "n": 14,
+     "same_sign": 0.8571428571428571,
+     "confirmed": 0.6428571428571429,
+     "lead_p50": -100.0
+    },
+    "test": {
+     "n": 6,
+     "same_sign": 1.0,
+     "confirmed": 0.6666666666666666,
+     "lead_p50": -250.0
+    }
+   },
+   "okx@2": {
+    "dev": {
+     "n": 2,
+     "same_sign": 1.0,
+     "confirmed": 0.5,
+     "lead_p50": -200.0
+    },
+    "test": {
+     "n": 2,
+     "same_sign": 1.0,
+     "confirmed": 0.5,
+     "lead_p50": 0.0
+    }
+   },
+   "okx@5": {
+    "dev": {
+     "n": 0,
+     "same_sign": NaN,
+     "confirmed": NaN,
+     "lead_p50": NaN
+    },
+    "test": {
+     "n": 0,
+     "same_sign": NaN,
+     "confirmed": NaN,
+     "lead_p50": NaN
+    }
+   },
+   "okx_swap@1": {
+    "dev": {
+     "n": 12,
+     "same_sign": 0.9166666666666666,
+     "confirmed": 0.5833333333333334,
+     "lead_p50": -200.0
+    },
+    "test": {
+     "n": 7,
+     "same_sign": 0.7142857142857143,
+     "confirmed": 0.5714285714285714,
+     "lead_p50": -150.0
+    }
+   },
+   "okx_swap@2": {
+    "dev": {
+     "n": 3,
+     "same_sign": 0.6666666666666666,
+     "confirmed": 0.6666666666666666,
+     "lead_p50": 0.0
+    },
+    "test": {
+     "n": 1,
+     "same_sign": 1.0,
+     "confirmed": 0.0,
+     "lead_p50": NaN
+    }
+   },
+   "okx_swap@5": {
+    "dev": {
+     "n": 0,
+     "same_sign": NaN,
+     "confirmed": NaN,
+     "lead_p50": NaN
+    },
+    "test": {
+     "n": 0,
+     "same_sign": NaN,
+     "confirmed": NaN,
+     "lead_p50": NaN
+    }
+   }
+  },
+  "features": {
+   "velocity binance": {
+    "dev": {
+     "n": 2991,
+     "rho1": 0.18699205018309023,
+     "rho5": 0.0931458607750199,
+     "acc_top_decile": 0.5650284185891007
+    },
+    "test": {
+     "n": 1450,
+     "rho1": 0.25736278675266877,
+     "rho5": 0.23577349310569742,
+     "acc_top_decile": 0.5055172413793103
+    }
+   },
+   "acceleration binance": {
+    "dev": {
+     "n": 2989,
+     "rho1": 0.07542323230067428,
+     "rho5": 0.03833315195977727,
+     "acc_top_decile": 0.5590498494479759
+    },
+    "test": {
+     "n": 1450,
+     "rho1": 0.0650340715367831,
+     "rho5": 0.02715387539561143,
+     "acc_top_decile": 0.4391891891891892
+    }
+   },
+   "velocity binance_futures": {
+    "dev": {
+     "n": 2989,
+     "rho1": 0.21028670933826285,
+     "rho5": 0.11403972474787659,
+     "acc_top_decile": 0.5660756105720977
+    },
+    "test": {
+     "n": 1450,
+     "rho1": 0.31340093580246076,
+     "rho5": 0.21013928851518676,
+     "acc_top_decile": 0.5275862068965518
+    }
+   },
+   "acceleration binance_futures": {
+    "dev": {
+     "n": 2987,
+     "rho1": 0.07718083337291748,
+     "rho5": 0.031684065582102384,
+     "acc_top_decile": 0.552058921995313
+    },
+    "test": {
+     "n": 1450,
+     "rho1": 0.06528845742092208,
+     "rho5": 0.02455934865850817,
+     "acc_top_decile": 0.4827586206896552
+    }
+   },
+   "divergence binance_futures \u2212 binance": {
+    "dev": {
+     "n": 2991,
+     "rho1": -0.023644329234673363,
+     "rho5": -0.05186080148933356,
+     "acc_top_decile": 0.3358208955223881
+    },
+    "test": {
+     "n": 1450,
+     "rho1": 0.18454574357658637,
+     "rho5": 0.23303889177254383,
+     "acc_top_decile": 0.3522012578616352
+    }
+   },
+   "velocity bitstamp": {
+    "dev": {
+     "n": 2997,
+     "rho1": 0.16921952890254982,
+     "rho5": 0.10595179834683636,
+     "acc_top_decile": 0.5618952285618952
+    },
+    "test": {
+     "n": 1450,
+     "rho1": 0.17921985884991526,
+     "rho5": 0.10280653847455497,
+     "acc_top_decile": 0.5110344827586207
+    }
+   },
+   "acceleration bitstamp": {
+    "dev": {
+     "n": 2995,
+     "rho1": 0.028919004711012816,
+     "rho5": 0.008315731461757007,
+     "acc_top_decile": 0.552253756260434
+    },
+    "test": {
+     "n": 1450,
+     "rho1": 0.03305203492875593,
+     "rho5": 0.03286239363307183,
+     "acc_top_decile": 0.4979310344827586
+    }
+   },
+   "divergence bitstamp \u2212 binance": {
+    "dev": {
+     "n": 2993,
+     "rho1": -0.021366857325319063,
+     "rho5": -0.034318369973672526,
+     "acc_top_decile": 0.08157099697885196
+    },
+    "test": {
+     "n": 1450,
+     "rho1": 0.07153597577634815,
+     "rho5": 0.173911173893144,
+     "acc_top_decile": 0.3939393939393939
+    }
+   },
+   "velocity bybit": {
+    "dev": {
+     "n": 2991,
+     "rho1": 0.2552666743083264,
+     "rho5": 0.150248168675455,
+     "acc_top_decile": 0.5740554998328319
+    },
+    "test": {
+     "n": 1450,
+     "rho1": 0.3118806349776129,
+     "rho5": 0.2070821957966243,
+     "acc_top_decile": 0.5303448275862069
+    }
+   },
+   "acceleration bybit": {
+    "dev": {
+     "n": 2989,
+     "rho1": 0.08639682837195076,
+     "rho5": 0.056731112573568866,
+     "acc_top_decile": 0.5600535296085647
+    },
+    "test": {
+     "n": 1450,
+     "rho1": 0.04133548267582615,
+     "rho5": 0.020475836953767583,
+     "acc_top_decile": 0.46206896551724136
+    }
+   },
+   "divergence bybit \u2212 binance": {
+    "dev": {
+     "n": 2993,
+     "rho1": 0.07402872636689509,
+     "rho5": 0.015251752171318512,
+     "acc_top_decile": 0.2709677419354839
+    },
+    "test": {
+     "n": 1450,
+     "rho1": 0.29224074245296155,
+     "rho5": 0.40675020590530286,
+     "acc_top_decile": 0.3466666666666667
+    }
+   },
+   "velocity bybit_linear": {
+    "dev": {
+     "n": 2989,
+     "rho1": 0.26973273327678793,
+     "rho5": 0.14236867981727996,
+     "acc_top_decile": 0.5774506523921044
+    },
+    "test": {
+     "n": 1450,
+     "rho1": 0.2725725937732036,
+     "rho5": 0.1571229167046777,
+     "acc_top_decile": 0.5289655172413793
+    }
+   },
+   "acceleration bybit_linear": {
+    "dev": {
+     "n": 2987,
+     "rho1": 0.06948251309916707,
+     "rho5": 0.034167563491414116,
+     "acc_top_decile": 0.42474916387959866
+    },
+    "test": {
+     "n": 1450,
+     "rho1": 0.041488094213278974,
+     "rho5": 0.022664412878062746,
+     "acc_top_decile": 0.4657534246575342
+    }
+   },
+   "divergence bybit_linear \u2212 binance": {
+    "dev": {
+     "n": 2991,
+     "rho1": 0.06543354857415112,
+     "rho5": 0.009775406982344083,
+     "acc_top_decile": 0.37142857142857144
+    },
+    "test": {
+     "n": 1450,
+     "rho1": 0.23697984736937797,
+     "rho5": 0.3478947117607444,
+     "acc_top_decile": 0.3509933774834437
+    }
+   },
+   "velocity coinbase": {
+    "dev": {
+     "n": 2994,
+     "rho1": 0.21393758710079958,
+     "rho5": 0.12190789992179663,
+     "acc_top_decile": 0.56
+    },
+    "test": {
+     "n": 1450,
+     "rho1": 0.2463373326116221,
+     "rho5": 0.14171666880056463,
+     "acc_top_decile": 0.684931506849315
+    }
+   },
+   "acceleration coinbase": {
+    "dev": {
+     "n": 2992,
+     "rho1": 0.06457182496842373,
+     "rho5": 0.035108836533723264,
+     "acc_top_decile": 0.3841059602649007
+    },
+    "test": {
+     "n": 1450,
+     "rho1": 0.022736123586100845,
+     "rho5": 0.024822342914647563,
+     "acc_top_decile": 0.42567567567567566
+    }
+   },
+   "divergence coinbase \u2212 binance": {
+    "dev": {
+     "n": 2993,
+     "rho1": 0.02195423374530285,
+     "rho5": -0.13040276144603888,
+     "acc_top_decile": 0.31790123456790126
+    },
+    "test": {
+     "n": 1450,
+     "rho1": 0.26854227771337613,
+     "rho5": 0.3896355686813043,
+     "acc_top_decile": 0.40782122905027934
+    }
+   },
+   "velocity coinbase_adv": {
+    "dev": {
+     "n": 2993,
+     "rho1": 0.15651053234638423,
+     "rho5": 0.08219161527672639,
+     "acc_top_decile": 0.4633333333333333
+    },
+    "test": {
+     "n": 1450,
+     "rho1": 0.2775399305357622,
+     "rho5": 0.1318737285255989,
+     "acc_top_decile": 0.7328767123287672
+    }
+   },
+   "acceleration coinbase_adv": {
+    "dev": {
+     "n": 2991,
+     "rho1": 0.03991055787263532,
+     "rho5": 0.011018185914954879,
+     "acc_top_decile": 0.3566666666666667
+    },
+    "test": {
+     "n": 1450,
+     "rho1": 0.027390436419874563,
+     "rho5": -0.010967364702669864,
+     "acc_top_decile": 0.47586206896551725
+    }
+   },
+   "divergence coinbase_adv \u2212 binance": {
+    "dev": {
+     "n": 2993,
+     "rho1": -0.0038205508684679783,
+     "rho5": -0.13805664633329776,
+     "acc_top_decile": 0.3183183183183183
+    },
+    "test": {
+     "n": 1450,
+     "rho1": 0.25816453886571933,
+     "rho5": 0.39208840308708043,
+     "acc_top_decile": 0.3812154696132597
+    }
+   },
+   "velocity deribit": {
+    "dev": {
+     "n": 2998,
+     "rho1": 0.2238258957796018,
+     "rho5": 0.1513329609530365,
+     "acc_top_decile": 0.5703802535023349
+    },
+    "test": {
+     "n": 1450,
+     "rho1": 0.27208309804536895,
+     "rho5": 0.1654971946208196,
+     "acc_top_decile": 0.696551724137931
+    }
+   },
+   "acceleration deribit": {
+    "dev": {
+     "n": 2996,
+     "rho1": 0.04933731469789906,
+     "rho5": 0.03703123416571194,
+     "acc_top_decile": 0.4
+    },
+    "test": {
+     "n": 1450,
+     "rho1": 0.02181837303332019,
+     "rho5": 0.034039746266666414,
+     "acc_top_decile": 0.38620689655172413
+    }
+   },
+   "divergence deribit \u2212 binance": {
+    "dev": {
+     "n": 2993,
+     "rho1": 0.20929490715061022,
+     "rho5": 0.07807689691458287,
+     "acc_top_decile": 0.38333333333333336
+    },
+    "test": {
+     "n": 1450,
+     "rho1": 0.3096333982444572,
+     "rho5": 0.3389472098693561,
+     "acc_top_decile": 0.5032679738562091
+    }
+   },
+   "velocity gemini": {
+    "dev": {
+     "n": 2995,
+     "rho1": 0.1391531841626936,
+     "rho5": 0.050612631805350534,
+     "acc_top_decile": 0.5552587646076794
+    },
+    "test": {
+     "n": 1450,
+     "rho1": 0.15942510431149254,
+     "rho5": 0.12196632685602908,
+     "acc_top_decile": 0.4993103448275862
+    }
+   },
+   "acceleration gemini": {
+    "dev": {
+     "n": 2993,
+     "rho1": 0.06253823365456722,
+     "rho5": 0.024422111873052536,
+     "acc_top_decile": 0.5425993985967257
+    },
+    "test": {
+     "n": 1450,
+     "rho1": 0.05333669398889589,
+     "rho5": 0.02556606554732399,
+     "acc_top_decile": 0.4910344827586207
+    }
+   },
+   "divergence gemini \u2212 binance": {
+    "dev": {
+     "n": 2993,
+     "rho1": 0.018465678657922504,
+     "rho5": -0.011821533908810146,
+     "acc_top_decile": 0.3201320132013201
+    },
+    "test": {
+     "n": 1450,
+     "rho1": 0.10400747759341104,
+     "rho5": 0.25446520338269274,
+     "acc_top_decile": 0.5424836601307189
+    }
+   },
+   "velocity hyperliquid": {
+    "dev": {
+     "n": 2990,
+     "rho1": 0.10006624409395101,
+     "rho5": 0.053880454113950496,
+     "acc_top_decile": 0.5411371237458193
+    },
+    "test": {
+     "n": 1450,
+     "rho1": 0.20979255412875228,
+     "rho5": 0.09979443421339389,
+     "acc_top_decile": 0.5013793103448276
+    }
+   },
+   "acceleration hyperliquid": {
+    "dev": {
+     "n": 2988,
+     "rho1": -0.005254071609435843,
+     "rho5": 0.003521404738543391,
+     "acc_top_decile": 0.5247657295850067
+    },
+    "test": {
+     "n": 1450,
+     "rho1": 0.0029213492608529575,
+     "rho5": 0.011733270246351351,
+     "acc_top_decile": 0.4868965517241379
+    }
+   },
+   "divergence hyperliquid \u2212 binance": {
+    "dev": {
+     "n": 2992,
+     "rho1": -0.1873934231685654,
+     "rho5": -0.22774621175184456,
+     "acc_top_decile": 0.10905349794238683
+    },
+    "test": {
+     "n": 1450,
+     "rho1": -0.0037492325777325423,
+     "rho5": 0.05082415755401651,
+     "acc_top_decile": 0.2810810810810811
+    }
+   },
+   "velocity kraken": {
+    "dev": {
+     "n": 2987,
+     "rho1": 0.19765246528379016,
+     "rho5": 0.12133835779934314,
+     "acc_top_decile": 0.5580850351523268
+    },
+    "test": {
+     "n": 1450,
+     "rho1": 0.2559535973393364,
+     "rho5": 0.16850770353181127,
+     "acc_top_decile": 0.5096551724137931
+    }
+   },
+   "acceleration kraken": {
+    "dev": {
+     "n": 2985,
+     "rho1": 0.05544272596668674,
+     "rho5": 0.022362011994215586,
+     "acc_top_decile": 0.33666666666666667
+    },
+    "test": {
+     "n": 1450,
+     "rho1": 0.030379295352190774,
+     "rho5": 0.020660129715373197,
+     "acc_top_decile": 0.4903448275862069
+    }
+   },
+   "divergence kraken \u2212 binance": {
+    "dev": {
+     "n": 2989,
+     "rho1": 0.04413783645936483,
+     "rho5": 0.07003109633014355,
+     "acc_top_decile": 0.2702702702702703
+    },
+    "test": {
+     "n": 1450,
+     "rho1": 0.2365558855497536,
+     "rho5": 0.3838999986153033,
+     "acc_top_decile": 0.496551724137931
+    }
+   },
+   "velocity okx": {
+    "dev": {
+     "n": 2987,
+     "rho1": 0.22978739988606414,
+     "rho5": 0.1471230026867176,
+     "acc_top_decile": 0.5661198526950117
+    },
+    "test": {
+     "n": 1450,
+     "rho1": 0.25793006180566824,
+     "rho5": 0.1697697911502978,
+     "acc_top_decile": 0.5124137931034483
+    }
+   },
+   "acceleration okx": {
+    "dev": {
+     "n": 2985,
+     "rho1": 0.06687750693651935,
+     "rho5": 0.04039207954715516,
+     "acc_top_decile": 0.5484087102177554
+    },
+    "test": {
+     "n": 1450,
+     "rho1": -0.0008632225080589708,
+     "rho5": 0.0140824727162734,
+     "acc_top_decile": 0.4993103448275862
+    }
+   },
+   "divergence okx \u2212 binance": {
+    "dev": {
+     "n": 2989,
+     "rho1": 0.08043491848754301,
+     "rho5": -0.007965419985856838,
+     "acc_top_decile": 0.3343108504398827
+    },
+    "test": {
+     "n": 1450,
+     "rho1": 0.2099188807582683,
+     "rho5": 0.3227003059696751,
+     "acc_top_decile": 0.31797235023041476
+    }
+   },
+   "velocity okx_swap": {
+    "dev": {
+     "n": 2987,
+     "rho1": 0.17905627989325348,
+     "rho5": 0.12255703390906897,
+     "acc_top_decile": 0.5610980917308336
+    },
+    "test": {
+     "n": 1450,
+     "rho1": 0.2250121080901048,
+     "rho5": 0.13168936335601122,
+     "acc_top_decile": 0.5048275862068966
+    }
+   },
+   "acceleration okx_swap": {
+    "dev": {
+     "n": 2985,
+     "rho1": 0.07426812086023592,
+     "rho5": 0.03667760643862693,
+     "acc_top_decile": 0.5534338358458961
+    },
+    "test": {
+     "n": 1450,
+     "rho1": 0.02919954911348094,
+     "rho5": 0.02432790298890465,
+     "acc_top_decile": 0.4917241379310345
+    }
+   },
+   "divergence okx_swap \u2212 binance": {
+    "dev": {
+     "n": 2989,
+     "rho1": -0.13877272150208747,
+     "rho5": -0.2270961431920982,
+     "acc_top_decile": 0.25391849529780564
+    },
+    "test": {
+     "n": 1450,
+     "rho1": 0.204472032337364,
+     "rho5": 0.4083763975096126,
+     "acc_top_decile": 0.3021978021978022
+    }
+   },
+   "trade imbalance coinbase": {
+    "dev": {
+     "n": 2981,
+     "rho1": 0.06515416151960114,
+     "rho5": 0.09161143360503934,
+     "acc_top_decile": 0.2753888380603843
+    },
+    "test": {
+     "n": 1444,
+     "rho1": 0.2305621671610012,
+     "rho5": 0.1533076866284179,
+     "acc_top_decile": 0.3684210526315789
+    }
+   },
+   "trade imbalance coinbase_adv": {
+    "dev": {
+     "n": 2981,
+     "rho1": -0.025584863455703637,
+     "rho5": -0.07184081618352099,
+     "acc_top_decile": 0.17508055853920515
+    },
+    "test": {
+     "n": 1444,
+     "rho1": -0.21108713073180443,
+     "rho5": -0.13893647619504046,
+     "acc_top_decile": 0.13385826771653545
+    }
+   },
+   "trade imbalance hyperliquid": {
+    "dev": {
+     "n": 2254,
+     "rho1": -0.010442223482445197,
+     "rho5": 0.00034396034608652953,
+     "acc_top_decile": 0.19827586206896552
+    },
+    "test": {
+     "n": 1110,
+     "rho1": 0.19326325709874978,
+     "rho5": 0.2016222061341144,
+     "acc_top_decile": 0.3416666666666667
+    }
+   },
+   "trade imbalance binance": {
+    "dev": {
+     "n": 2981,
+     "rho1": 0.04878056297173232,
+     "rho5": 0.004707262731795608,
+     "acc_top_decile": 0.27983539094650206
+    },
+    "test": {
+     "n": 1431,
+     "rho1": 0.11476891217225615,
+     "rho5": 0.09518883115041789,
+     "acc_top_decile": 0.30633802816901406
+    }
+   },
+   "trade imbalance bybit": {
+    "dev": {
+     "n": 1268,
+     "rho1": 0.15972598881691688,
+     "rho5": 0.17387134726481904,
+     "acc_top_decile": 0.109375
+    },
+    "test": {
+     "n": 658,
+     "rho1": 0.20419971704802548,
+     "rho5": 0.22467210489297032,
+     "acc_top_decile": 0.3567251461988304
+    }
+   },
+   "trade imbalance okx_swap": {
+    "dev": {
+     "n": 2494,
+     "rho1": 0.1650751657217161,
+     "rho5": 0.09390690990976053,
+     "acc_top_decile": 0.23107569721115537
+    },
+    "test": {
+     "n": 1279,
+     "rho1": 0.04381671638383511,
+     "rho5": 0.09453058780480353,
+     "acc_top_decile": 0.078125
+    }
+   },
+   "trade imbalance bybit_linear": {
+    "dev": {
+     "n": 2415,
+     "rho1": 0.1267106196787586,
+     "rho5": 0.19733949924577882,
+     "acc_top_decile": 0.26671732522796354
+    },
+    "test": {
+     "n": 1025,
+     "rho1": 0.23762396556599405,
+     "rho5": 0.2602403754609522,
+     "acc_top_decile": 0.27522935779816515
+    }
+   },
+   "trade imbalance gemini": {
+    "dev": {
+     "n": 431,
+     "rho1": 0.06970693499691431,
+     "rho5": 0.18229540427168078,
+     "acc_top_decile": 0.1464968152866242
+    },
+    "test": {
+     "n": 200,
+     "rho1": 0.15641329469932033,
+     "rho5": 0.10889468135028535,
+     "acc_top_decile": 0.4666666666666667
+    }
+   },
+   "trade imbalance bitfinex": {
+    "dev": {
+     "n": 667,
+     "rho1": 0.31704296460759784,
+     "rho5": 0.3946684527216243,
+     "acc_top_decile": 0.4342105263157895
+    },
+    "test": {
+     "n": 312,
+     "rho1": 0.505615665427054,
+     "rho5": 0.4150700721670654,
+     "acc_top_decile": 0.7804878048780488
+    }
+   },
+   "trade imbalance okx": {
+    "dev": {
+     "n": 1528,
+     "rho1": 0.1373640648373514,
+     "rho5": 0.1221103803225265,
+     "acc_top_decile": 0.12903225806451613
+    },
+    "test": {
+     "n": 673,
+     "rho1": 0.22691952946037378,
+     "rho5": 0.2369430430622759,
+     "acc_top_decile": 0.08823529411764706
+    }
+   },
+   "trade imbalance deribit": {
+    "dev": {
+     "n": 938,
+     "rho1": 0.27706906183228214,
+     "rho5": 0.31716381634016466,
+     "acc_top_decile": 0.3657289002557545
+    },
+    "test": {
+     "n": 557,
+     "rho1": 0.3263988506435452,
+     "rho5": 0.3303067919617408,
+     "acc_top_decile": 0.3975609756097561
+    }
+   },
+   "trade imbalance kraken": {
+    "dev": {
+     "n": 1439,
+     "rho1": 0.13383685204630286,
+     "rho5": 0.11361109727739523,
+     "acc_top_decile": 0.2550335570469799
+    },
+    "test": {
+     "n": 700,
+     "rho1": 0.19477689559261882,
+     "rho5": 0.32393269231548566,
+     "acc_top_decile": 0.14084507042253522
+    }
+   },
+   "trade imbalance bitstamp": {
+    "dev": {
+     "n": 686,
+     "rho1": 0.08261085327677863,
+     "rho5": 0.05078583802723253,
+     "acc_top_decile": 0.32701421800947866
+    },
+    "test": {
+     "n": 235,
+     "rho1": 0.4065572797945022,
+     "rho5": 0.1980582766849527,
+     "acc_top_decile": 0.5925925925925926
+    }
+   },
+   "OBI top1 bitstamp": {
+    "dev": {
+     "n": 2999,
+     "rho1": 0.22456679865422852,
+     "rho5": 0.200297237213352,
+     "acc_top_decile": 0.3408360128617363
+    },
+    "test": {
+     "n": 1450,
+     "rho1": 0.34185264740009086,
+     "rho5": 0.3190027790186818,
+     "acc_top_decile": 0.5789473684210527
+    }
+   },
+   "OBI top5 bitstamp": {
+    "dev": {
+     "n": 2999,
+     "rho1": 0.24501779362363615,
+     "rho5": 0.21550101795098223,
+     "acc_top_decile": 0.29372937293729373
+    },
+    "test": {
+     "n": 1450,
+     "rho1": 0.2908279272350964,
+     "rho5": 0.21602439428110226,
+     "acc_top_decile": 0.42758620689655175
+    }
+   },
+   "OBI top10 bitstamp": {
+    "dev": {
+     "n": 2999,
+     "rho1": 0.19014033365385957,
+     "rho5": 0.1688082976032208,
+     "acc_top_decile": 0.34
+    },
+    "test": {
+     "n": 1450,
+     "rho1": 0.18571795374625408,
+     "rho5": 0.08180904494008699,
+     "acc_top_decile": 0.3103448275862069
+    }
+   },
+   "OBI top1 binance": {
+    "dev": {
+     "n": 2993,
+     "rho1": 0.1965373031559287,
+     "rho5": 0.06666630847101356,
+     "acc_top_decile": 0.44666666666666666
+    },
+    "test": {
+     "n": 1450,
+     "rho1": 0.3427563502931661,
+     "rho5": 0.36890532422577743,
+     "acc_top_decile": 0.47586206896551725
+    }
+   },
+   "OBI top5 binance": {
+    "dev": {
+     "n": 2993,
+     "rho1": 0.19064294712000732,
+     "rho5": 0.05878830838370863,
+     "acc_top_decile": 0.48333333333333334
+    },
+    "test": {
+     "n": 1450,
+     "rho1": 0.34537060416720045,
+     "rho5": 0.37371250405770573,
+     "acc_top_decile": 0.4482758620689655
+    }
+   },
+   "OBI top10 binance": {
+    "dev": {
+     "n": 2993,
+     "rho1": 0.18177669611386912,
+     "rho5": 0.0540422391912189,
+     "acc_top_decile": 0.43
+    },
+    "test": {
+     "n": 1450,
+     "rho1": 0.3427046681838696,
+     "rho5": 0.3627773062709926,
+     "acc_top_decile": 0.46206896551724136
+    }
+   },
+   "OBI top1 okx": {
+    "dev": {
+     "n": 2989,
+     "rho1": 0.30786586490581236,
+     "rho5": 0.3675079771102184,
+     "acc_top_decile": 0.46204620462046203
+    },
+    "test": {
+     "n": 1450,
+     "rho1": 0.2166987551510213,
+     "rho5": 0.06447203883948299,
+     "acc_top_decile": 0.3904109589041096
+    }
+   },
+   "OBI top5 okx": {
+    "dev": {
+     "n": 2989,
+     "rho1": 0.23675739231413903,
+     "rho5": 0.22688137821953042,
+     "acc_top_decile": 0.3411371237458194
+    },
+    "test": {
+     "n": 1450,
+     "rho1": 0.246318587930972,
+     "rho5": 0.11058329921950089,
+     "acc_top_decile": 0.39869281045751637
+    }
+   },
+   "OBI top10 okx": {
+    "dev": {
+     "n": 2989,
+     "rho1": 0.23675739231413903,
+     "rho5": 0.22688137821953042,
+     "acc_top_decile": 0.3411371237458194
+    },
+    "test": {
+     "n": 1450,
+     "rho1": 0.246318587930972,
+     "rho5": 0.11058329921950089,
+     "acc_top_decile": 0.39869281045751637
+    }
+   }
+  }
+ },
+ "fair_price": {
+  "coinbase alone (live now)": {
+   "react2_p50": 83.765380859375,
+   "react2_p90": 512.594482421875,
+   "missed2": 0,
+   "react5_p50": NaN,
+   "react5_p90": NaN,
+   "own_shocks_per_h": 60.019672585758315,
+   "false_per_h": 0.0,
+   "false_share_dev": 0.0,
+   "false_share_test": 0.0,
+   "noise_bp": 0.12406421027946865
+  },
+  "median of 3 (previous live)": {
+   "react2_p50": 220.059814453125,
+   "react2_p90": 512.594482421875,
+   "missed2": 0,
+   "react5_p50": NaN,
+   "react5_p90": NaN,
+   "own_shocks_per_h": 36.01180355145499,
+   "false_per_h": 0.0,
+   "false_share_dev": 0.0,
+   "false_share_test": 0.0,
+   "noise_bp": 0.09686478494434249
+  },
+  "lead mode, 3 sources (live 09-29)": {
+   "react2_p50": 83.765380859375,
+   "react2_p90": 198.409423828125,
+   "missed2": 0,
+   "react5_p50": NaN,
+   "react5_p90": NaN,
+   "own_shocks_per_h": 78.02557436148581,
+   "false_per_h": 0.0,
+   "false_share_dev": 0.0,
+   "false_share_test": 0.0,
+   "noise_bp": 0.3611619803801037
+  },
+  "median of all spot": {
+   "react2_p50": 220.059814453125,
+   "react2_p90": 412.594482421875,
+   "missed2": 0,
+   "react5_p50": NaN,
+   "react5_p90": NaN,
+   "own_shocks_per_h": 42.01377081003082,
+   "false_per_h": 0.0,
+   "false_share_dev": 0.0,
+   "false_share_test": 0.0,
+   "noise_bp": 0.08206445337870683
+  },
+  "median of all (spot + perps)": {
+   "react2_p50": 220.059814453125,
+   "react2_p90": 371.104736328125,
+   "missed2": 0,
+   "react5_p50": NaN,
+   "react5_p90": NaN,
+   "own_shocks_per_h": 42.01377081003082,
+   "false_per_h": 0.0,
+   "false_share_dev": 0.0,
+   "false_share_test": 0.0,
+   "noise_bp": 0.08293989631405785
+  },
+  "microprice median, all": {
+   "react2_p50": 220.059814453125,
+   "react2_p90": 312.594482421875,
+   "missed2": 0,
+   "react5_p50": NaN,
+   "react5_p90": NaN,
+   "own_shocks_per_h": 42.01377081003082,
+   "false_per_h": 0.0,
+   "false_share_dev": 0.0,
+   "false_share_test": 0.0,
+   "noise_bp": 0.08385456589500699
+  },
+  "liquidity-weighted, all": {
+   "react2_p50": 212.594482421875,
+   "react2_p90": 828.01806640625,
+   "missed2": 0,
+   "react5_p50": NaN,
+   "react5_p90": NaN,
+   "own_shocks_per_h": 60.019672585758315,
+   "false_per_h": 0.0,
+   "false_share_dev": 0.0,
+   "false_share_test": 0.0,
+   "noise_bp": 0.12490407927269202
+  },
+  "lead mode, all sources": {
+   "react2_p50": 33.765380859375,
+   "react2_p90": 221.104736328125,
+   "missed2": 0,
+   "react5_p50": NaN,
+   "react5_p90": NaN,
+   "own_shocks_per_h": 120.03934517151663,
+   "false_per_h": 0.0,
+   "false_share_dev": 0.0,
+   "false_share_test": 0.0,
+   "noise_bp": 0.473326550197901
+  },
+  "trade VWAP 1 s, all": {
+   "react2_p50": 278.01806640625,
+   "react2_p90": 1033.765380859375,
+   "missed2": 1,
+   "react5_p50": NaN,
+   "react5_p90": NaN,
+   "own_shocks_per_h": 48.01573806860665,
+   "false_per_h": 6.0019672585758315,
+   "false_share_dev": 0.0,
+   "false_share_test": 1.0,
+   "noise_bp": 0.16344864408548404
+  },
+  "deribit alone (lowest delay)": {
+   "react2_p50": 70.059814453125,
+   "react2_p90": 171.104736328125,
+   "missed2": 0,
+   "react5_p50": NaN,
+   "react5_p90": NaN,
+   "own_shocks_per_h": 90.02950887863747,
+   "false_per_h": 0.0,
+   "false_share_dev": 0.0,
+   "false_share_test": 0.0,
+   "noise_bp": 0.14922952424482086
+  }
+ },
+ "venue": {
+  "1": {
+   "events": 21,
+   "in_band": 8,
+   "repriced": 17,
+   "response_ms": {
+    "p25": 132.271484375,
+    "p50": 169.01953125,
+    "p75": 225.38232421875,
+    "p90": 307.712646484375
+   },
+   "variants": {
+    "first source (any)|dev": {
+     "n": 5,
+     "detect_vs_first_p50": 0.0,
+     "window_p50": 146.5712890625,
+     "window_p90": 225.38232421875,
+     "window_pos": 1.0,
+     "fillable": 1.0,
+     "paid_minus_pre_p50": 0.010000000000000009,
+     "markout_p50": -5.239700000000001,
+     "markout_mean": -1.4912800000000004,
+     "n_markout": 5
+    },
+    "first source (any)|all": {
+     "n": 8,
+     "detect_vs_first_p50": 0.0,
+     "window_p50": 146.5712890625,
+     "window_p90": 307.712646484375,
+     "window_pos": 1.0,
+     "fillable": 0.875,
+     "paid_minus_pre_p50": 0.0,
+     "markout_p50": -5.239700000000001,
+     "markout_mean": -1.6065714285714288,
+     "n_markout": 7
+    },
+    "coinbase alone (live now)|dev": {
+     "n": 5,
+     "detect_vs_first_p50": 261.38818359375,
+     "window_p50": 46.324462890625,
+     "window_p90": 60.503173828125,
+     "window_pos": 0.6,
+     "fillable": 0.6,
+     "paid_minus_pre_p50": 0.020000000000000018,
+     "markout_p50": 9.407499999999999,
+     "markout_mean": 3.141833333333332,
+     "n_markout": 3
+    },
+    "coinbase alone (live now)|all": {
+     "n": 8,
+     "detect_vs_first_p50": 69.983154296875,
+     "window_p50": 26.518310546875,
+     "window_p90": 155.399169921875,
+     "window_pos": 0.625,
+     "fillable": 0.625,
+     "paid_minus_pre_p50": 0.010000000000000009,
+     "markout_p50": 1.544299999999999,
+     "markout_mean": 1.1149999999999989,
+     "n_markout": 5
+    },
+    "median of 3 (previous live)|dev": {
+     "n": 5,
+     "detect_vs_first_p50": 119.983154296875,
+     "window_p50": 10.503173828125,
+     "window_p90": 105.399169921875,
+     "window_pos": 0.6,
+     "fillable": 0.8,
+     "paid_minus_pre_p50": 0.01999999999999999,
+     "markout_p50": -7.3125,
+     "markout_mean": 0.5415499999999991,
+     "n_markout": 4
+    },
+    "median of 3 (previous live)|all": {
+     "n": 8,
+     "detect_vs_first_p50": 119.983154296875,
+     "window_p50": 10.503173828125,
+     "window_p90": 196.324462890625,
+     "window_pos": 0.75,
+     "fillable": 0.75,
+     "paid_minus_pre_p50": 0.0,
+     "markout_p50": -5.3948,
+     "markout_mean": -0.10390000000000062,
+     "n_markout": 6
+    },
+    "lead mode, 3 sources (live 09-29)|dev": {
+     "n": 5,
+     "detect_vs_first_p50": -14.13818359375,
+     "window_p50": 155.399169921875,
+     "window_p90": 346.324462890625,
+     "window_pos": 1.0,
+     "fillable": 0.8,
+     "paid_minus_pre_p50": 0.0,
+     "markout_p50": -9.379700000000001,
+     "markout_mean": -0.2994500000000002,
+     "n_markout": 4
+    },
+    "lead mode, 3 sources (live 09-29)|all": {
+     "n": 8,
+     "detect_vs_first_p50": 24.4892578125,
+     "window_p50": 146.40966796875,
+     "window_p90": 346.324462890625,
+     "window_pos": 1.0,
+     "fillable": 0.75,
+     "paid_minus_pre_p50": 0.0,
+     "markout_p50": -5.3948,
+     "markout_mean": -0.6645666666666669,
+     "n_markout": 6
+    },
+    "lead mode, all sources|dev": {
+     "n": 5,
+     "detect_vs_first_p50": 19.983154296875,
+     "window_p50": 205.399169921875,
+     "window_p90": 296.324462890625,
+     "window_pos": 0.8,
+     "fillable": 0.8,
+     "paid_minus_pre_p50": 0.0,
+     "markout_p50": -5.239700000000001,
+     "markout_mean": 2.5307,
+     "n_markout": 4
+    },
+    "lead mode, all sources|all": {
+     "n": 8,
+     "detect_vs_first_p50": 19.983154296875,
+     "window_p50": 205.399169921875,
+     "window_p90": 696.40966796875,
+     "window_pos": 0.875,
+     "fillable": 0.75,
+     "paid_minus_pre_p50": 0.0,
+     "markout_p50": -5.239700000000001,
+     "markout_mean": 1.2222,
+     "n_markout": 6
+    },
+    "median of all (spot + perps)|dev": {
+     "n": 5,
+     "detect_vs_first_p50": 169.983154296875,
+     "window_p50": 46.40966796875,
+     "window_p90": 55.399169921875,
+     "window_pos": 0.6,
+     "fillable": 0.8,
+     "paid_minus_pre_p50": 0.03,
+     "markout_p50": -8.346800000000002,
+     "markout_mean": 0.28297499999999864,
+     "n_markout": 4
+    },
+    "median of all (spot + perps)|all": {
+     "n": 8,
+     "detect_vs_first_p50": 150.139892578125,
+     "window_p50": 8.884521484375,
+     "window_p90": 196.324462890625,
+     "window_pos": 0.625,
+     "fillable": 0.75,
+     "paid_minus_pre_p50": 0.0,
+     "markout_p50": -5.3948,
+     "markout_mean": -0.27628333333333427,
+     "n_markout": 6
+    }
+   }
+  },
+  "2": {
+   "events": 6,
+   "in_band": 3,
+   "repriced": 4,
+   "response_ms": {
+    "p25": 9.629638671875,
+    "p50": 141.099853515625,
+    "p75": 445.36083984375,
+    "p90": 445.36083984375
+   },
+   "variants": {
+    "first source (any)|dev": {
+     "n": 1,
+     "detect_vs_first_p50": 0.0,
+     "window_p50": 9.629638671875,
+     "window_p90": 9.629638671875,
+     "window_pos": 1.0,
+     "fillable": 1.0,
+     "paid_minus_pre_p50": 0.020000000000000018,
+     "markout_p50": 8.429199999999998,
+     "markout_mean": 8.429199999999998,
+     "n_markout": 1
+    },
+    "first source (any)|all": {
+     "n": 3,
+     "detect_vs_first_p50": 0.0,
+     "window_p50": 445.36083984375,
+     "window_p90": 445.36083984375,
+     "window_pos": 1.0,
+     "fillable": 1.0,
+     "paid_minus_pre_p50": 0.0,
+     "markout_p50": 2.5443,
+     "markout_mean": 1.859566666666666,
+     "n_markout": 3
+    },
+    "coinbase alone (live now)|dev": {
+     "n": 1,
+     "detect_vs_first_p50": 171.104736328125,
+     "window_p50": -161.47509765625,
+     "window_p90": -161.47509765625,
+     "window_pos": 0.0,
+     "fillable": 1.0,
+     "paid_minus_pre_p50": 0.020000000000000018,
+     "markout_p50": 8.429199999999998,
+     "markout_mean": 8.429199999999998,
+     "n_markout": 1
+    },
+    "coinbase alone (live now)|all": {
+     "n": 3,
+     "detect_vs_first_p50": 171.104736328125,
+     "window_p50": 128.941162109375,
+     "window_p90": 128.941162109375,
+     "window_pos": 0.6666666666666666,
+     "fillable": 1.0,
+     "paid_minus_pre_p50": 0.009999999999999995,
+     "markout_p50": 1.4848000000000003,
+     "markout_mean": 1.5063999999999995,
+     "n_markout": 3
+    },
+    "median of 3 (previous live)|dev": {
+     "n": 1,
+     "detect_vs_first_p50": 221.104736328125,
+     "window_p50": -211.47509765625,
+     "window_p90": -211.47509765625,
+     "window_pos": 0.0,
+     "fillable": 0.0,
+     "paid_minus_pre_p50": NaN,
+     "markout_p50": NaN,
+     "markout_mean": NaN,
+     "n_markout": 0
+    },
+    "median of 3 (previous live)|all": {
+     "n": 3,
+     "detect_vs_first_p50": 221.104736328125,
+     "window_p50": 28.941162109375,
+     "window_p90": 28.941162109375,
+     "window_pos": 0.6666666666666666,
+     "fillable": 0.6666666666666666,
+     "paid_minus_pre_p50": 0.0,
+     "markout_p50": -5.3948,
+     "markout_mean": -1.9549999999999998,
+     "n_markout": 2
+    },
+    "lead mode, 3 sources (live 09-29)|dev": {
+     "n": 1,
+     "detect_vs_first_p50": 171.104736328125,
+     "window_p50": -161.47509765625,
+     "window_p90": -161.47509765625,
+     "window_pos": 0.0,
+     "fillable": 1.0,
+     "paid_minus_pre_p50": 0.020000000000000018,
+     "markout_p50": 8.429199999999998,
+     "markout_mean": 8.429199999999998,
+     "n_markout": 1
+    },
+    "lead mode, 3 sources (live 09-29)|all": {
+     "n": 3,
+     "detect_vs_first_p50": 198.409423828125,
+     "window_p50": 128.941162109375,
+     "window_p90": 128.941162109375,
+     "window_pos": 0.6666666666666666,
+     "fillable": 1.0,
+     "paid_minus_pre_p50": 0.009999999999999995,
+     "markout_p50": 1.4848000000000003,
+     "markout_mean": 1.5063999999999995,
+     "n_markout": 3
+    },
+    "lead mode, all sources|dev": {
+     "n": 1,
+     "detect_vs_first_p50": 221.104736328125,
+     "window_p50": -211.47509765625,
+     "window_p90": -211.47509765625,
+     "window_pos": 0.0,
+     "fillable": 0.0,
+     "paid_minus_pre_p50": NaN,
+     "markout_p50": NaN,
+     "markout_mean": NaN,
+     "n_markout": 0
+    },
+    "lead mode, all sources|all": {
+     "n": 3,
+     "detect_vs_first_p50": 221.104736328125,
+     "window_p50": 28.941162109375,
+     "window_p90": 28.941162109375,
+     "window_pos": 0.6666666666666666,
+     "fillable": 0.6666666666666666,
+     "paid_minus_pre_p50": 0.0,
+     "markout_p50": -5.3948,
+     "markout_mean": -1.9549999999999998,
+     "n_markout": 2
+    },
+    "median of all (spot + perps)|dev": {
+     "n": 1,
+     "detect_vs_first_p50": 371.104736328125,
+     "window_p50": -361.47509765625,
+     "window_p90": -361.47509765625,
+     "window_pos": 0.0,
+     "fillable": 0.0,
+     "paid_minus_pre_p50": NaN,
+     "markout_p50": NaN,
+     "markout_mean": NaN,
+     "n_markout": 0
+    },
+    "median of all (spot + perps)|all": {
+     "n": 3,
+     "detect_vs_first_p50": 371.104736328125,
+     "window_p50": -71.058837890625,
+     "window_p90": -71.058837890625,
+     "window_pos": 0.3333333333333333,
+     "fillable": 0.6666666666666666,
+     "paid_minus_pre_p50": 0.0,
+     "markout_p50": -5.3948,
+     "markout_mean": -3.54005,
+     "n_markout": 2
+    }
+   }
+  }
+ },
+ "parameters": {
+  "confirm_frac": 0.5,
+  "lead_window_ms": 30.0,
+  "pipeline_ms": 135.0,
+  "book_lag_ms": 31.0,
+  "slippage": 0.04,
+  "min_shares": 5.0,
+  "exit_s": 20.0
+ }
+}

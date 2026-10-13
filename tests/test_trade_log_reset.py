@@ -24,6 +24,7 @@ def _bot(tmp_path, **kw):
         assets=("BTC",),
         state_path=str(tmp_path / "state.json"),
         trade_log=str(tmp_path / "trades.jsonl"),
+        earnings_path=str(tmp_path / "earnings.jsonl"),
         **kw,
     )
 
@@ -57,7 +58,7 @@ def test_ledger_append_writes_both_sides(tmp_path):
     bot = _bot(tmp_path)
     bot._ledger_append({"event": "fill", "slug": "btc-updown-5m-1"})
     assert bot.ledger == [{"event": "fill", "slug": "btc-updown-5m-1",
-                           "mode": bot.mode_label, "live": bot.is_live}]
+                           "mode": bot.mode_label, "live": bot.is_live, "strategy": bot.cfg.engine.strategy}]
     assert "btc-updown-5m-1" in bot.trade_log.read_text(encoding="utf-8")
 
 
@@ -67,6 +68,8 @@ def test_every_row_says_which_bot_wrote_it(tmp_path):
     bot._ledger_append({"event": "fill", "slug": "btc-updown-5m-1"})
     row = bot.ledger[0]
     assert row["mode"] == "live-paper" and row["live"] is False
+    # ... and which strategy: spot_lag and repriced_momentum rows must never mix
+    assert row["strategy"] == bot.cfg.engine.strategy != ""
     # a row that already names its writer is left alone
     bot._ledger_append({"event": "fill", "slug": "x", "mode": "LIVE-ARMED", "live": True})
     assert bot.ledger[-1]["mode"] == "LIVE-ARMED" and bot.ledger[-1]["live"] is True

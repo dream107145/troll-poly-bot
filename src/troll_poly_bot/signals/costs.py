@@ -64,11 +64,16 @@ class CostBreakdown:
     slippage: float          # expected adverse move of the ask while in flight
     latency_cost: float      # model edge lost to a stale view (uncertainty band)
     net_edge: float
+    #: margin for being wrong about ``model_p`` itself (momentum engine)
+    uncertainty: float = 0.0
+    #: what getting OUT costs before settlement: the exit taker fee and the
+    #: half spread paid to sell into the bid (momentum engine; 0 = held to the bell)
+    exit_cost: float = 0.0
 
     def as_dict(self) -> dict[str, float]:
         return {k: round(getattr(self, k), 5) for k in (
             "model_p", "market_p", "ask", "gross_edge", "fee", "half_spread",
-            "slippage", "latency_cost", "net_edge")}
+            "slippage", "latency_cost", "uncertainty", "exit_cost", "net_edge")}
 
 
 @dataclass(slots=True)
@@ -84,15 +89,25 @@ class CostModel:
     uncertainty_charge: float = 1.0
 
     def evaluate(self, model_p: float, ask: float, bid: float | None,
-                 model_uncertainty: float = 0.0) -> CostBreakdown:
+                 model_uncertainty: float = 0.0, maker: bool = False) -> CostBreakdown:
+        """Costs of buying at ``ask``.
+
+        ``maker`` prices a RESTING order at that level instead of a taker
+        hitting it: the venue's fee is taker-only, so the fee is the maker
+        fee (zero on every schedule seen), and there is no arrival slippage
+        -- the order does not travel to a moving quote, the quote comes to
+        it. What a maker pays instead is adverse selection, which the paper
+        matcher models pessimistically and this breakdown does not.
+        """
         mid = (ask + bid) / 2.0 if bid is not None else ask
-        fee = self.fee.taker_fee_per_share(ask)
+        fee = self.fee.maker_fee_per_share(ask) if maker else self.fee.taker_fee_per_share(ask)
         half_spread = max(0.0, ask - mid)
         latency = self.uncertainty_charge * max(0.0, model_uncertainty)
         gross = model_p - ask
-        net = gross - fee - self.expected_slippage - latency
+        slippage = 0.0 if maker else self.expected_slippage
+        net = gross - fee - slippage - latency
         return CostBreakdown(
             model_p=model_p, market_p=mid, ask=ask, gross_edge=gross, fee=fee,
-            half_spread=half_spread, slippage=self.expected_slippage,
+            half_spread=half_spread, slippage=slippage,
             latency_cost=latency, net_edge=net,
         )

@@ -77,6 +77,19 @@ class LatencyProfile:
         )
 
 
+#: Every real Polymarket order POST round trip logged on this account before
+#: 2026-09-23 (tpb-bot and tpb-momentum-live, the venue reply to our POST),
+#: ms. The paper engine draws from these until the live adapter has measured
+#: more. p50 243, max 661. The old paper engine used 35 ms.
+VENUE_RTT_PRIOR_MS: tuple[float, ...] = (218.0, 225.0, 231.0, 238.0, 239.0, 243.0, 244.0,
+                                         286.0, 297.0, 317.0, 661.0)
+#: Decision -> POST: the order waiting for the venue worker thread and being
+#: signed. NOT yet measured (the adapter records it from now on); a prior
+#: that includes the occasional first-sight metadata fetch and a worker busy
+#: with a reconciliation.
+PRESEND_PRIOR_MS: tuple[float, ...] = (15.0, 20.0, 30.0, 40.0, 60.0, 90.0, 150.0, 250.0)
+
+
 # --------------------------------------------------------------------------
 # Presets. Measure your own before trusting any of these (scripts/measure_latency.py).
 # --------------------------------------------------------------------------

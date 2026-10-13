@@ -235,6 +235,78 @@ def test_no_liquidity_at_signing_is_unfillable_not_an_api_error():
     assert client.posted == [] and ex.consecutive_errors == 0
 
 
+class RequestRejectedError(Exception):
+    """Same name and shape as the SDK's: it carries the venue's ``code``."""
+
+    def __init__(self, message, *, status=400, code=None):
+        super().__init__(message)
+        self.status, self.code = status, code
+
+
+@pytest.mark.parametrize("exc", [
+    RequestRejectedError("order couldn't be fully filled. FOK orders are fully filled or killed."),
+    RequestRejectedError("killed", code="fok_not_filled"),
+    RequestRejectedError("no match", code="unmatched"),
+    InsufficientLiquidityError("Insufficient liquidity for full fill."),
+])
+def test_a_killed_fok_raised_at_post_time_is_not_an_api_error(exc):
+    """The SDK raises a killed FOK instead of returning an unfilled response.
+
+    Five of those in a row halted the live bot on 2026-09-22 as '5
+    consecutive API errors'. A kill is the order's normal other outcome; six
+    in a row must leave the error counter at zero and the bot trading.
+    """
+    client = FakeClient(post_raises=exc)
+    ex = _ex(client, caps=LiveCaps(max_orders_per_hour=100, kill_file="none"))
+    for _ in range(6):
+        assert _run(ex, _order(price=0.10, size=10.0))[0].reject_reason is RejectReason.FOK_UNFILLABLE
+    assert ex.consecutive_errors == 0 and not ex.halted
+    assert len(client.posted) == 6                    # they did reach the venue
+    assert ex.n_rejected[RejectReason.FOK_UNFILLABLE] == 6
+
+
+def test_the_venue_size_floor_is_our_mistake_not_an_api_error():
+    """Seen live: 10.53 sh @ 0.07 = $0.73 -> 'invalid amount for a marketable
+    BUY order'. It was counted toward the consecutive-error halt; it must not be."""
+    exc = RequestRejectedError("invalid amount for a marketable BUY order ($0.73), minimum is $1")
+    client = FakeClient(post_raises=exc)
+    ex = _ex(client, caps=LiveCaps(max_orders_per_hour=100, kill_file="none"))
+    for _ in range(6):
+        assert _run(ex, _order(price=0.07, size=10.53))[0].reject_reason is RejectReason.MIN_SIZE
+    assert ex.consecutive_errors == 0 and not ex.halted
+
+
+def test_the_hourly_cap_never_blocks_a_sell():
+    """Entries may exhaust the budget; a position must still be exitable."""
+    client = FakeClient(post_raises=RequestRejectedError("killed", code="fok_not_filled"))
+    ex = _ex(client, caps=LiveCaps(max_orders_per_hour=1, kill_file="none"))
+    assert _run(ex, _order(price=0.10, size=10.0))[0].reject_reason is RejectReason.FOK_UNFILLABLE
+    assert _run(ex, _order(price=0.10, size=10.0))[0].reject_reason is RejectReason.LIVE_CAPS
+    res = _run(ex, _order(side=Side.SELL, price=0.60, size=10.0))
+    assert res[0].reject_reason is RejectReason.FOK_UNFILLABLE     # sent, not capped
+    assert len(client.posted) == 2
+
+
+def test_a_killed_fok_still_counts_toward_the_hourly_cap():
+    """It was posted, so it spends an order slot -- same as a killed response."""
+    exc = RequestRejectedError("killed", code="fok_not_filled")
+    client = FakeClient(post_raises=exc)
+    ex = _ex(client, caps=LiveCaps(max_orders_per_hour=2, kill_file="none"))
+    assert _run(ex, _order(price=0.10, size=10.0))[0].reject_reason is RejectReason.FOK_UNFILLABLE
+    assert _run(ex, _order(price=0.10, size=10.0))[0].reject_reason is RejectReason.FOK_UNFILLABLE
+    assert _run(ex, _order(price=0.10, size=10.0))[0].reject_reason is RejectReason.LIVE_CAPS
+
+
+def test_other_rejections_at_post_time_still_count_as_api_errors():
+    """The fix must not swallow real faults: a signer mismatch is still an error."""
+    exc = RequestRejectedError("the order signer address has to be the address of the API KEY", code="invalid_signature")
+    client = FakeClient(post_raises=exc)
+    ex = _ex(client, caps=LiveCaps(max_orders_per_hour=100, kill_file="none"))
+    for _ in range(5):
+        assert _run(ex, _order(price=0.10, size=10.0))[0].reject_reason is RejectReason.API_ERROR
+    assert ex.halted and "5 consecutive" in ex.halted
+
+
 def test_settlement_carries_redemption_and_reconcile_retires_it():
     client = FakeClient(balance=50.0, responses=[accepted("a", making=4, taking=10)])
     ex = _ex(client, bankroll=20.0, caps=LiveCaps(kill_file="none"))
@@ -245,8 +317,10 @@ def test_settlement_carries_redemption_and_reconcile_retires_it():
     assert ex.pending_redemption == 10.0 and ex.positions[TOKEN].shares == 0.0
     assert ex.equity() == pytest.approx(20.0 - 4.0 - fee + 10.0)
     assert not ex._redeem_pending                            # no relayer key: nothing queued
-    # the venue then shows the 4 USDC spent AND the 10 USDC redeemed
+    # the venue then shows the 4 USDC spent AND the 10 USDC redeemed -- once the
+    # fill has settled there (a check inside the grace period compares nothing)
     client.balance = 50.0 - 4.0 + 10.0
+    ex._last_fill_mono -= ex.CASH_SETTLE_GRACE_S + 1.0
     ex.reconcile()
     assert ex.balance == pytest.approx(20.0 + 6.0)
     assert ex.pending_redemption == pytest.approx(0.0)
@@ -313,3 +387,92 @@ def test_worker_drains_the_queue_reconciles_and_closes_the_client():
     snap = ex.snapshot()
     assert snap["armed"] and snap["venue_balance"] == 50.0 and snap["wallet_type"] == "DEPOSIT_WALLET"
     assert client.closed
+
+
+def test_a_settling_fill_is_not_balance_drift_but_a_real_move_still_is(monkeypatch):
+    """2026-09-24 14:18: a reconciliation 3 s after a 2.05 USDC buy saw the venue's
+    cash not yet moved, latched BALANCE_DRIFT +2.05 and stopped entries for an hour."""
+    import time as _time
+    from troll_poly_bot.execution.polymarket import PolymarketExchange
+    ex = PolymarketExchange.__new__(PolymarketExchange)
+    ex.venue_balance_at_start = None
+    ex.pending_redemption = 0.0
+    ex._local_cash_delta = 0.0
+    ex._last_fill_mono = 0.0
+    ex.balance_drift = 0.0
+    ex.bankroll = ex.balance = 50.0
+    ex.consecutive_errors = 0
+    ex.reconcile_positions = lambda **kw: {}
+    ex.check_foreign_trades = lambda **kw: []
+    import threading as _threading
+    ex._lock, ex._inflight, ex._post_epoch, ex.reconcile_deferred, ex.last_reconcile_ms = _threading.RLock(), 0, 0, 0, 0.0
+    venue = {"cash": 73.57}
+    ex._fetch_balance = lambda: (venue["cash"], None)
+    ex.reconcile()                                   # baseline
+    # the buy is booked locally; the venue has not settled it yet
+    ex._local_cash_delta -= 2.05
+    ex._last_fill_mono = _time.monotonic()
+    ex.reconcile()
+    assert ex.balance_drift == 0.0
+    # it settles; the next quiet check agrees
+    venue["cash"] = 71.52
+    ex._last_fill_mono = _time.monotonic() - ex.CASH_SETTLE_GRACE_S - 1.0
+    ex.reconcile()
+    assert abs(ex.balance_drift) < 1e-9
+    # cash that no fill explains (a deposit, a trade we never saw) is still drift
+    venue["cash"] = 76.52
+    ex.reconcile()
+    assert ex.balance_drift == pytest.approx(5.0)
+
+
+def _ioc(price=0.40, size=10.0):
+    return Order(token_id=TOKEN, side=Side.BUY, price=price, size=size, tif=TimeInForce.IOC,
+                 expected_price=price, tag="UP")
+
+
+def test_an_ioc_entry_is_signed_as_fak_and_a_partial_fill_is_booked():
+    from troll_poly_bot.types import OrderState
+    # 10 shares wanted at <= 0.40; the venue had 6: 2.40 USDC paid for 6 shares
+    client = FakeClient(responses=[accepted("v1", 2.40, 6.0)])
+    ex = _ex(client)
+    res = _run(ex, _ioc())
+    assert client.signed[0]["order_type"] == "FAK"
+    assert res[0].reject_reason is RejectReason.NONE and res[0].fills
+    assert res[0].fills[0].size == pytest.approx(6.0)
+    assert res[0].order.state is OrderState.PARTIAL and res[0].order.remaining == pytest.approx(4.0)
+    assert ex.positions[TOKEN].shares == pytest.approx(6.0)
+    # a plain FOK is still signed as FOK
+    client2 = FakeClient()
+    _run(_ex(client2), _order())
+    assert client2.signed[0]["order_type"] == "FOK"
+
+
+@pytest.mark.parametrize("message", ["no orders found to match with FAK order",
+                                     "order couldn't be fully filled. FAK orders are partially filled or killed"])
+def test_a_fak_that_found_nothing_is_not_an_api_error(message):
+    client = FakeClient(post_raises=RequestRejectedError(message))
+    ex = _ex(client)
+    for _ in range(6):                                  # more than the halt threshold of 5
+        res = _run(ex, _ioc())
+        assert res[0].reject_reason is RejectReason.FOK_UNFILLABLE
+    assert ex.consecutive_errors == 0 and not ex.halted
+
+
+def test_a_buy_spends_the_expected_price_so_it_returns_the_shares_asked():
+    """2026-10-08: the venue spends a market BUY's whole amount, so size x LIMIT bought more shares than asked whenever
+    the price was better (10 sh <= 0.56 at 0.54 = 10.37). The amount is size x the expected price; the limit still caps."""
+    client = FakeClient()
+    ex = _ex(client, armed=False)
+    o = _order(price=0.40, size=10.0)
+    o.expected_price = 0.38
+    _run(ex, o)
+    kw = client.signed[-1]
+    assert kw["amount"] == "3.80" and kw["max_price"] == "0.40"                 # 10 shares at 0.38, never above 0.40
+    o2 = _order(price=0.30, size=10.37)
+    o2.expected_price = 0.30                                                   # a pair take: limit AT the ask
+    _run(ex, o2)
+    assert client.signed[-1]["amount"] == "3.11"                               # 10.37 x 0.30 = 3.111 -> 3.11: 10.37 sh
+    o3 = _order(price=0.40, size=10.0)                                        # an expected price above the limit: the limit
+    o3.expected_price = 0.45
+    _run(ex, o3)
+    assert client.signed[-1]["amount"] == "4.00"

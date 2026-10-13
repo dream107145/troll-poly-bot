@@ -26,7 +26,8 @@ CLOSE_MS = 300_000.0
 def _bot(tmp_path, **engine):
     bot = LiveBot(assets=("BTC",),
                   state_path=str(tmp_path / "state.json"),
-                  trade_log=str(tmp_path / "trades.jsonl"))
+                  trade_log=str(tmp_path / "trades.jsonl"),
+                  earnings_path=str(tmp_path / "earnings.jsonl"))
     bot.exchange.fees = FeeModel.from_schedule(FeeSchedule(rate=0.07))
     for k, v in engine.items():
         setattr(bot.cfg.engine, k, v)
@@ -175,6 +176,79 @@ def test_an_exited_market_is_left_alone(tmp_path):
     lm.exited = True
     bot._take_profit(0.0)
     assert lm.inflight == 0
+
+
+def test_a_rested_order_keeps_the_market_held_until_it_completes(tmp_path):
+    """The paper engine acks a GTC order the moment it rests, with no fills.
+    That ack must not free the market: four resting orders stacked on one
+    window in six seconds the first time the maker entry ran."""
+    from troll_poly_bot.execution.paper import OrderResult, RejectReason
+    from troll_poly_bot.types import Order, OrderState, Side, TimeInForce
+    bot = _bot(tmp_path)
+    lm = _market(bot)
+    order = Order(token_id=YES, side=Side.BUY, price=0.50, size=10.0, tif=TimeInForce.GTC)
+    bot.fair_by_order[order.order_id] = {"slug": SLUG, "asset": "BTC", "epoch": 0, "side": "UP"}
+    lm.inflight = 1
+    order.state = OrderState.RESTING
+    bot._on_result(OrderResult(order, [], RejectReason.NONE, 0.0), 0.0)     # "it rested"
+    assert lm.inflight == 1                                                # still working
+    order.state = OrderState.CANCELLED
+    bot._on_result(OrderResult(order, [], RejectReason.EXPIRED, 0.0), 0.0)  # nobody came
+    assert lm.inflight == 0
+
+
+def test_a_stop_sells_through_the_bid_and_a_take_profit_waits_at_it(tmp_path):
+    """Both bots lost a stop to a killed fill-or-kill at the bid. A stop is
+    urgent: it crosses stop_cross_ticks below the bid. A take-profit is not."""
+    bot = _bot(tmp_path, take_profit_delta=0.05, stop_loss_delta=0.20, stop_cross_ticks=2)
+    lm = _market(bot, bids=((0.25, 500.0), (0.24, 500.0), (0.23, 500.0)))
+    _hold(bot, avg=0.50)
+    ex = bot._exit_candidate(lm, YES, 0.0)
+    assert ex["kind"] == "STOP_LOSS" and ex["bid"] == pytest.approx(0.25)
+    assert ex["px"] == pytest.approx(0.23)                        # two ticks through
+    assert ex["pnl"] == pytest.approx(0.23 * 100 - ex["fee"] - 50.0)
+    lm2 = _market(bot, bids=((0.60, 500.0),))
+    ex2 = bot._exit_candidate(lm2, YES, 0.0)
+    assert ex2["kind"] == "TAKE_PROFIT" and ex2["px"] == pytest.approx(0.60)
+
+
+def test_a_crossed_stop_still_needs_the_depth_down_to_its_price(tmp_path):
+    bot = _bot(tmp_path, stop_loss_delta=0.20, stop_cross_ticks=2)
+    lm = _market(bot, bids=((0.25, 500.0),))                      # nothing resting below 0.25
+    _hold(bot, avg=0.50, shares=100.0)
+    assert bot._exit_candidate(lm, YES, 0.0) is not None           # 500 at 0.25 >= 0.23 covers 100
+    lm = _market(bot, bids=((0.25, 50.0),))
+    assert bot._exit_candidate(lm, YES, 0.0) is None
+    assert bot.exec_rejections.get("EXIT_THIN_BID") == 1
+
+
+def test_a_killed_entry_is_not_retried_every_tick(tmp_path):
+    """Seen live: the same entry re-sent the tick after each kill."""
+    from troll_poly_bot.live import ENTRY_RETRY_MS
+    bot = _bot(tmp_path)
+    lm = _market(bot)
+    assert not bot._entry_throttled(lm, 0.0)                 # never sent: allowed
+    lm.last_entry_ms = 0.0                                   # an order just went out
+    assert bot._entry_throttled(lm, 500.0)
+    assert bot.exec_rejections.get("ENTRY_THROTTLED") == 1
+    assert not bot._entry_throttled(lm, ENTRY_RETRY_MS + 1.0)
+
+
+def test_a_killed_exit_is_not_retried_every_tick(tmp_path):
+    """A fill-or-kill exit the venue kills is retried while the condition
+    holds. Once per tick, that spent the live hourly budget in a minute; the
+    retry waits EXIT_RETRY_MS per market instead."""
+    from troll_poly_bot.live import EXIT_RETRY_MS
+    bot = _bot(tmp_path, take_profit_delta=0.05)
+    lm = _market(bot)
+    _hold(bot, avg=0.50)
+    bot._take_profit(0.0)
+    assert lm.inflight == 1 and lm.last_exit_ms == 0.0
+    lm.inflight = 0                                   # the kill came back
+    bot._take_profit(500.0)                           # too soon
+    assert lm.inflight == 0
+    bot._take_profit(EXIT_RETRY_MS + 1.0)             # now it may try again
+    assert lm.inflight == 1 and lm.last_exit_ms == EXIT_RETRY_MS + 1.0
 
 
 # ──────────────────────────────── booking it ─────────────────────────────────
@@ -404,3 +478,29 @@ def test_epoch_budget_now_admits_twice_as_many_windows():
     assert r.max_epoch_exposure_usdc / r.max_position_usdc == 6.0   # was 3.0
     # and the position count cannot outrun the money cap
     assert r.max_concurrent_positions * r.max_position_usdc <= r.max_total_exposure_usdc
+
+
+def test_a_position_below_the_venue_minimum_is_held_not_retried(tmp_path):
+    """A partial fill-and-kill can leave 1-4 shares: no sell can be placed (the venue
+    minimum is 5), so the exit skips it and it settles."""
+    bot = _bot(tmp_path, take_profit_delta=0.05)
+    lm = _market(bot, bids=((0.60, 500.0),))
+    _hold(bot, shares=3.0, avg=0.50)
+    assert bot._exit_candidate(lm, YES, 0.0) is None
+    assert bot.exec_rejections.get("EXIT_BELOW_MIN_SIZE") == 1
+    _hold(bot, shares=5.0, avg=0.50)                    # at the minimum it exits as before
+    assert bot._exit_candidate(lm, YES, 0.0) is not None
+
+
+def test_the_last_look_asks_a_fak_only_for_the_venue_minimum(tmp_path):
+    from troll_poly_bot.types import Order, TimeInForce
+    bot = _bot(tmp_path)
+    lm = _market(bot)
+    lm.books[YES].asks = {0.52: 6.0, 0.60: 100.0}
+    bot.token_index[YES] = (SLUG, lm)
+    fok = Order(token_id=YES, side=Side.BUY, price=0.54, size=10.0, tif=TimeInForce.FOK)
+    fak = Order(token_id=YES, side=Side.BUY, price=0.54, size=10.0, tif=TimeInForce.IOC)
+    assert "need 10.0" in (bot._pre_post_check(fok) or "")
+    assert bot._pre_post_check(fak) is None                   # 6 >= the 5-share minimum
+    lm.books[YES].asks = {0.52: 3.0, 0.60: 100.0}
+    assert "need 5.0" in (bot._pre_post_check(fak) or "")

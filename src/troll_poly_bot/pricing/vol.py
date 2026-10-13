@@ -105,6 +105,21 @@ class EwmaVol:
         return self.sigma_per_sec * math.sqrt(365.25 * 24 * 3600)
 
 
+def shock_sigma(vol) -> float:
+    """Per-second sigma on the 1-second scale, for judging a 1-second move.
+
+    ``TwoScaleVol.sigma_per_sec`` multiplies the 1 s estimate by the measured
+    slow/fast ratio (0.8-3.0) so that it prices a 5-MINUTE horizon correctly. A
+    1-second shock must be measured against 1-second volatility: over 30 h of
+    2026-09-29/30 prices that ratio ran at p90 1.4-1.8 and up to 2.8, so a
+    "3 sigma" shock rule was really asking for 4-8 one-second sigmas, most of all
+    after a sustained move, when the ratio climbs."""
+    fast = getattr(vol, "fast", None)
+    if fast is not None and getattr(fast, "ready", False):
+        return fast.sigma_per_sec
+    return vol.sigma_per_sec
+
+
 @dataclass(slots=True)
 class TwoScaleVol:
     """Volatility estimated at the horizon actually being priced.

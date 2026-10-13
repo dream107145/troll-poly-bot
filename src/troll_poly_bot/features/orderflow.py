@@ -48,11 +48,15 @@ class OrderFlowState:
     quote_max_age_ms: float = 3_000.0
     _trades: deque = field(default_factory=deque)           # (ts_ms, signed_notional, notional)
     _book: dict[str, tuple[float, float, float]] = field(default_factory=dict)   # exch -> (ts, bid_sz, ask_sz)
+    #: bumped by every stored trade or quote; keys the features() memo
+    _version: int = 0
+    _memo: tuple | None = None
 
     def on_trade(self, notional: float, aggressor_buy: bool, ts_ms: float) -> None:
         if notional <= 0.0:
             return
         self._trades.append((ts_ms, notional if aggressor_buy else -notional, notional))
+        self._version += 1
         cutoff = ts_ms - self.keep_s * 1000.0
         while self._trades and self._trades[0][0] < cutoff:
             self._trades.popleft()
@@ -61,6 +65,7 @@ class OrderFlowState:
         if bid_size is None or ask_size is None or bid_size <= 0 or ask_size <= 0:
             return
         self._book[exchange] = (ts_ms, bid_size, ask_size)
+        self._version += 1
 
     def trade_flow(self, now_ms: float, window_s: float) -> tuple[float, float, int]:
         """(buy notional, sell notional, count) over the trailing window."""
@@ -88,9 +93,31 @@ class OrderFlowState:
         return (bid - ask) / (bid + ask)
 
     def features(self, now_ms: float) -> dict[str, float]:
+        """Memoised on (now, every trade and quote seen): the engine, the chart
+        recorder and the dashboard ask for the same asset at the same instant
+        within one tick, and each scan of 30 s of trades costs ~1.2 ms. Any new
+        trade or quote changes the key, so a hit is exactly the same answer."""
+        key = (now_ms, self._version)
+        if self._memo is not None and self._memo[0] == key:
+            return dict(self._memo[1])
+        out = self._features(now_ms)
+        self._memo = (key, out)
+        return dict(out)
+
+    def _features(self, now_ms: float) -> dict[str, float]:
         out: dict[str, float] = {}
-        for w in (5, 15, 30):
-            buy, sell, n = self.trade_flow(now_ms, float(w))
+        # one pass over the trailing 30 s serves all three windows (three passes
+        # were 4 % of the live bot's CPU on 2026-09-29)
+        flows = {w: [0.0, 0.0, 0] for w in (5, 15, 30)}
+        cutoffs = {w: now_ms - w * 1000.0 for w in flows}
+        for ts, signed, notional in reversed(self._trades):
+            if ts < cutoffs[30]:
+                break
+            for w, f in flows.items():
+                if ts >= cutoffs[w]:
+                    f[0 if signed > 0 else 1] += notional
+                    f[2] += 1
+        for w, (buy, sell, n) in flows.items():
             out[f"tfi_{w}s"] = _imbalance(buy, sell) if n > 0 else math.nan
             if w == 30:
                 out["trade_rate_30s"] = n / 30.0

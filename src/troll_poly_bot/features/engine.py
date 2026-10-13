@@ -52,10 +52,17 @@ class SpotHistory:
     min_gap_ms: float = 200.0
     _t: list[float] = field(default_factory=list)
     _lp: list[float] = field(default_factory=list)
+    #: the newest price, kept even when it is inside ``min_gap_ms`` of the last
+    #: sample: "the price now" must be the price now, not one up to 200 ms old
+    #: (the spot-lag shock is a 1 s return; 2026-09-24). History is unchanged.
+    _tip_t: float = -math.inf
+    _tip_lp: float = 0.0
 
     def update(self, price: float, ts_ms: float) -> None:
         if price <= 0.0:
             return
+        if ts_ms >= self._tip_t:
+            self._tip_t, self._tip_lp = ts_ms, math.log(price)
         if self._t and ts_ms - self._t[-1] < self.min_gap_ms:
             return
         if self._t and ts_ms < self._t[-1]:
@@ -70,6 +77,8 @@ class SpotHistory:
 
     def at(self, ts_ms: float, max_gap_ms: float = 5_000.0) -> float | None:
         """Log price as of ``ts_ms`` (last observation at or before it)."""
+        if self._tip_t <= ts_ms and (not self._t or self._tip_t > self._t[-1]):
+            return self._tip_lp if ts_ms - self._tip_t <= max_gap_ms else None
         k = bisect.bisect_right(self._t, ts_ms) - 1
         if k < 0:
             return None
@@ -125,9 +134,15 @@ class _MarketHistory:
 class FeatureEngine:
     spot: dict[str, SpotHistory] = field(default_factory=dict)
     market: dict[str, _MarketHistory] = field(default_factory=dict)
+    #: sampling gap of new spot histories (the fast feed sets 20 ms so sub-second
+    #: returns are measured over their real horizon, not a 200 ms grid)
+    spot_min_gap_ms: float = 200.0
 
     def update_spot(self, asset: str, price: float, ts_ms: float) -> None:
-        self.spot.setdefault(asset, SpotHistory()).update(price, ts_ms)
+        h = self.spot.get(asset)
+        if h is None:
+            h = self.spot[asset] = SpotHistory(min_gap_ms=self.spot_min_gap_ms)
+        h.update(price, ts_ms)
 
     def update_market(self, slug: str, up_price: float, ts_ms: float) -> None:
         self.market.setdefault(slug, _MarketHistory()).update(up_price, ts_ms)

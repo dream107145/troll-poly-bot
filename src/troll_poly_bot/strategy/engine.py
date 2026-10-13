@@ -61,15 +61,42 @@ class Reason(str, Enum):
     PRICE_BAND = "PRICE_BAND"
     LOW_LIQUIDITY = "LOW_LIQUIDITY"
     HIGH_SLIPPAGE = "HIGH_SLIPPAGE"
+    STALE_QUOTE = "STALE_QUOTE"
     EDGE_TOO_SMALL = "EDGE_TOO_SMALL"
     LOW_CONFIDENCE = "LOW_CONFIDENCE"
     ALREADY_POSITIONED = "ALREADY_POSITIONED"
     RISK_LIMIT = "RISK_LIMIT"
     SIZE_ZERO = "SIZE_ZERO"
+    # MOMENTUM_TAKER (strategy/momentum.py)
+    WEAK_MOMENTUM = "WEAK_MOMENTUM"
+    MOMENTUM_REVERSING = "MOMENTUM_REVERSING"
+    TOKEN_ALREADY_MOVED = "TOKEN_ALREADY_MOVED"
+    COOLDOWN = "COOLDOWN"
+    MAX_TRADES = "MAX_TRADES"
+    MOMENTUM_EXHAUSTED = "MOMENTUM_EXHAUSTED"       # the move has peaked, stalled or the book turned
+    VOLATILITY_SPIKE = "VOLATILITY_SPIKE"           # realised vol far above the estimate: a jump, not a trend
+    ASSET_FILTERED = "ASSET_FILTERED"               # not on the strategy's asset allow-list
+    ASK_ABOVE_MAX_ENTRY = "ASK_ABOVE_MAX_ENTRY"     # the executable price exceeds what the signal can pay
+    # SPOT_LAG portfolio gates (strategy/spot_lag.py): one market = one opportunity
+    MARKET_ENTERED = "MARKET_ENTERED"               # this 5-minute market already had its entry
+    MARKET_ATTEMPTS = "MARKET_ATTEMPTS"             # this market's buy attempts are used up
+    HOURLY_BUY_LIMIT = "HOURLY_BUY_LIMIT"           # buy orders sent in the last hour, all markets
+    EXPOSURE_CAP = "EXPOSURE_CAP"                   # the global exposure budget cannot fit even the minimum order
+    # REPRICED_MOMENTUM (strategy/repriced_momentum.py); logged as REJECT_<name>
+    REPRICING_INVALID = "REPRICING_INVALID"         # no meaningful expected move, or a price missing / impossible
+    REPRICING_TOO_LOW = "REPRICING_TOO_LOW"         # the token has repriced less than the zone
+    REPRICING_TOO_HIGH = "REPRICING_TOO_HIGH"       # ... more than the zone
+    SPOT_MOMENTUM_WEAK = "SPOT_MOMENTUM_WEAK"       # the spot is still moving our way, but too slowly
+    DIRECTION_MISMATCH = "DIRECTION_MISMATCH"       # the spot or the token is no longer moving the shock's way
+    OVERSHOOT = "OVERSHOOT"                         # the ask is past the fair value by more than allowed
 
 
 @dataclass(slots=True)
 class EngineConfig:
+    #: which decision engine runs: "analytic" (this file) or the experimental
+    #: "momentum_taker" (strategy/momentum.py). Everything else is shared.
+    strategy: str = "analytic"
+
     # --- when to look ----------------------------------------------------
     #: Books go one-sided once a window is decided (60-70% of samples in the
     #: last 60 s, >90% in the last 30 s), so the last minute is structurally
@@ -102,6 +129,18 @@ class EngineConfig:
     #: and a 5c spread cap took 4.5x the fills of the original 0.05 setting
     #: at +0.056/share (t 1.6 over epochs) against +0.148/share (t 1.9) --
     #: more trades, thinner and equally unproven edge per trade.
+    #: Rest a limit order at the model's price instead of hitting the ask.
+    #: Every taker fill-or-kill sent live on 2026-09-22 was killed: the model
+    #: only finds edge in a quote that is about to vanish, and a taker loses
+    #: that race at any latency. A resting order is filled when the market
+    #: comes to it -- fee-free, since the venue charges takers only -- at the
+    #: cost of adverse selection instead of slippage.
+    maker_entry: bool = False
+    #: Ticks above the best bid to rest at (0 = join the bid). Capped one tick
+    #: below the ask so the order never crosses and turns into a taker.
+    maker_improve_ticks: int = 1
+    #: How long an unfilled resting order waits before it is cancelled.
+    maker_ttl_s: float = 20.0
     min_net_edge: float = 0.02
     expected_slippage: float = 0.005
     #: Fraction of the model's sigma-error band subtracted from the edge.
@@ -114,6 +153,22 @@ class EngineConfig:
     max_spread: float = 0.05
     min_depth_shares: float = 10.0
     cross_ticks: int = 1
+    #: Hard bound on how far past the seen ask a taker limit may reach, in
+    #: price units; the smaller of this and ``cross_ticks`` ticks applies.
+    max_slippage: float = 0.05
+
+    # --- stale quotes ------------------------------------------------------
+    #: Do not buy the side spot has just moved toward while the token has not
+    #: re-priced. The local book lags the venue: 27 of the 29 real orders sent
+    #: in this state on 2026-09-22 were fill-or-kill kills, and the paper
+    #: engine "filled" every one (docs/live_audit_2026-09-22.md). Spot must
+    #: have moved at least ``stale_quote_sigma_mult`` sigmas over
+    #: ``stale_quote_window_s`` and the Up mid must have moved less than
+    #: ``stale_quote_min_reprice`` in the same direction for the gate to fire.
+    stale_quote_enabled: bool = True
+    stale_quote_window_s: float = 3.0
+    stale_quote_sigma_mult: float = 1.0
+    stale_quote_min_reprice: float = 0.02
 
     # --- taking profit before settlement ---------------------------------
     #: A 5m up/down market pays 1.0 or 0.0. Holding a position that has moved
@@ -145,6 +200,11 @@ class EngineConfig:
     stop_loss_enabled: bool = True
     #: Sell when the best bid falls this far BELOW our average entry.
     stop_loss_delta: float = 0.20
+    #: A stop is urgent: sell this many ticks BELOW the bid so the fill-or-kill
+    #: survives a downtick between decision and arrival. A take-profit is
+    #: optional and stays at the bid. Killed stops left positions riding to
+    #: the print on both the live and the paper bot on 2026-09-22.
+    stop_cross_ticks: int = 2
 
     # --- order flow (Strategy D) ----------------------------------------
     #: Tilt the pricer's mean by an expected drift from spot-exchange order
@@ -185,6 +245,9 @@ class SideView:
     depth_at_limit: float
     costs: CostBreakdown | None
     reason: Reason | None
+    #: the price we would actually pay: the ask for a taker, the resting
+    #: level for a maker
+    entry_px: float | None = None
 
 
 @dataclass(slots=True)
@@ -212,6 +275,13 @@ class Evaluation:
     features: dict[str, float] = field(default_factory=dict)
     ofi_score: float = math.nan
     ofi_drift_bps: float = 0.0
+    #: spot log-return over the stale-quote window, bps, and the Up mid's
+    #: change over the same window: the two numbers the STALE_QUOTE gate reads
+    spot_move_bps: float = math.nan
+    market_reprice: float = math.nan
+    #: the most this signal may pay per share and still clear every cost and
+    #: the required edge (momentum engine); None when not computed
+    max_entry_price: float | None = None
 
     @property
     def tradeable(self) -> bool:
@@ -226,6 +296,8 @@ class Evaluation:
             "side": self.side, "limit": _r(self.limit_price), "size": _r(self.size, 2),
             "net_edge": _r(self.net_edge), "confidence": _r(self.confidence),
             "ofi": _r(self.ofi_score, 3), "ofi_drift_bps": _r(self.ofi_drift_bps, 3),
+            "spot_move_bps": _r(self.spot_move_bps, 2), "market_reprice": _r(self.market_reprice, 3),
+            "max_entry": _r(self.max_entry_price),
             "sides": [{"side": s.side, "p_model": _r(s.p_model), "p_market": _r(s.p_market),
                        "ask": _r(s.ask), "bid": _r(s.bid), "depth": _r(s.depth_at_limit, 1),
                        "costs": None if s.costs is None else s.costs.as_dict(),
@@ -321,7 +393,10 @@ class StrategyEngine:
         latency: LatencyProfile,
         balance: float,
         orderflow: dict[str, float] | None = None,
+        quote_ages: dict[str, float | None] | None = None,
     ) -> Evaluation:
+        # ``quote_ages`` (token -> ms, None = no valid book) is read by the
+        # momentum engine; the analytic engine keeps its own book-age gate
         cfg, m = self.cfg, meta.market
         left = m.seconds_remaining(now)
         ev = Evaluation(slug=m.slug, asset=m.asset, seconds_left=left, reason=None)
@@ -387,6 +462,28 @@ class StrategyEngine:
                 or (cfg.exclude_extreme_move and reg.extreme):
             return self._reject(ev, Reason.BAD_REGIME, reg.label)
 
+        # --- stale quote: has the token re-priced the last spot move? ---------
+        # (the market history is written here; the live path never did, so
+        # mkt_chg_* were NaN live while the replay had them)
+        stale_up = stale_down = False
+        if mid_up is not None:
+            mh = self.features.market.get(m.slug)
+            w_ms = cfg.stale_quote_window_s * 1000.0
+            prev_mid = mh.at(now - w_ms) if mh is not None else None
+            self.features.update_market(m.slug, mid_up, now)
+            sh = self.features.spot.get(m.asset)
+            lr = sh.logret(now, cfg.stale_quote_window_s) if sh is not None else None
+            if lr is not None:
+                ev.spot_move_bps = lr * 1e4
+            if prev_mid is not None:
+                ev.market_reprice = mid_up - prev_mid
+            if cfg.stale_quote_enabled and lr is not None and prev_mid is not None:
+                band = cfg.stale_quote_sigma_mult * vol.sigma_per_sec * math.sqrt(cfg.stale_quote_window_s)
+                if lr >= band and ev.market_reprice < cfg.stale_quote_min_reprice:
+                    stale_up = True
+                if lr <= -band and ev.market_reprice > -cfg.stale_quote_min_reprice:
+                    stale_down = True
+
         # --- each side ------------------------------------------------------
         cost_model = CostModel(fee=meta.fee, expected_slippage=cfg.for_asset(m.asset, "expected_slippage"),
                                uncertainty_charge=cfg.uncertainty_charge)
@@ -409,12 +506,29 @@ class StrategyEngine:
             if bid is not None and ask - bid > cfg.max_spread:
                 sv.reason = Reason.LOW_LIQUIDITY
                 continue
+            if (side == "UP" and stale_up) or (side == "DOWN" and stale_down):
+                # the offer we see is the one the venue has already pulled
+                sv.reason = Reason.STALE_QUOTE
+                continue
             limit = min(1.0 - m.tick_size, round(ask + cfg.cross_ticks * m.tick_size, 4))
             sv.depth_at_limit = self._depth(book, limit)
             if sv.depth_at_limit < cfg.min_depth_shares:
                 sv.reason = Reason.LOW_LIQUIDITY
                 continue
-            cb = cost_model.evaluate(p, ask, bid, fv.uncertainty)
+            if cfg.maker_entry:
+                # rest above the bid, never at or through the ask
+                if bid is None:
+                    sv.reason = Reason.NO_OFFER
+                    continue
+                entry = round(min(bid + cfg.maker_improve_ticks * m.tick_size, ask - m.tick_size), 4)
+                if entry < m.tick_size:
+                    sv.reason = Reason.PRICE_BAND
+                    continue
+                cb = cost_model.evaluate(p, entry, bid, fv.uncertainty, maker=True)
+            else:
+                entry = ask
+                cb = cost_model.evaluate(p, ask, bid, fv.uncertainty)
+            sv.entry_px = entry
             sv.costs = cb
             if cb.net_edge < min_edge:
                 sv.reason = Reason.EDGE_TOO_SMALL
@@ -431,28 +545,37 @@ class StrategyEngine:
             reasons = [s.reason for s in ev.sides if s.reason is not None]
             # report the most informative reason: an edge that was measured
             # beats a side that never had an offer
-            pick = (Reason.EDGE_TOO_SMALL if Reason.EDGE_TOO_SMALL in reasons else
+            pick = (Reason.STALE_QUOTE if Reason.STALE_QUOTE in reasons else
+                    Reason.EDGE_TOO_SMALL if Reason.EDGE_TOO_SMALL in reasons else
                     Reason.LOW_CONFIDENCE if Reason.LOW_CONFIDENCE in reasons else
                     reasons[0] if reasons else Reason.NO_OFFER)
-            return self._reject(ev, pick)
+            detail = ""
+            if pick is Reason.STALE_QUOTE:
+                detail = f"spot {ev.spot_move_bps:+.1f} bps, mid {ev.market_reprice:+.3f} over {cfg.stale_quote_window_s:.0f}s"
+            return self._reject(ev, pick, detail)
 
         # --- risk and size ----------------------------------------------------
         cb = best.costs
         confidence = cb.net_edge / (cb.net_edge + fv.uncertainty) if cb.net_edge + fv.uncertainty > 0 else 0.0
         epoch = int(m.open_ts // 1000)
-        limit = min(1.0 - m.tick_size, round(best.ask + cfg.cross_ticks * m.tick_size, 4))
+        entry = best.entry_px if best.entry_px is not None else best.ask
+        if cfg.maker_entry:
+            limit = entry                                  # the resting level itself
+        else:
+            reach = min(cfg.cross_ticks * m.tick_size, cfg.max_slippage)
+            limit = min(1.0 - m.tick_size, round(best.ask + reach, 4))
         shares, note = self.risk.size(
-            p=best.p_model, price=best.ask, confidence=confidence, balance=balance,
+            p=best.p_model, price=entry, confidence=confidence, balance=balance,
             asset=m.asset, epoch=epoch, side=best.side, available_shares=best.depth_at_limit,
             min_size=m.min_size,
         )
         if shares <= 0.0:
             return self._reject(ev, Reason.SIZE_ZERO, note)
-        verdict = self.risk.check(m.slug, m.asset, epoch, shares * best.ask)
+        verdict = self.risk.check(m.slug, m.asset, epoch, shares * entry)
         if not verdict.ok:
             return self._reject(ev, Reason(verdict.reason), verdict.detail)
 
-        ev.side, ev.token_id, ev.limit_price, ev.expected_price = best.side, best.token_id, limit, best.ask
+        ev.side, ev.token_id, ev.limit_price, ev.expected_price = best.side, best.token_id, limit, entry
         ev.size, ev.net_edge, ev.confidence, ev.size_note = shares, cb.net_edge, confidence, note
         self.last[m.slug] = ev
         return ev
@@ -464,6 +587,12 @@ class StrategyEngine:
         keeps the edge? Never chase: if the ask moved past the limit, drop it."""
         if book is None or book.best_ask is None:
             return Reason.NO_OFFER
+        if self.cfg.maker_entry:
+            # a resting bid must stay BELOW the ask, or posting it makes us the
+            # taker we chose not to be; the next tick re-prices it
+            if book.best_ask <= ev.limit_price + 1e-9:
+                return Reason.HIGH_SLIPPAGE
+            return None
         if book.best_ask > ev.limit_price + 1e-9:
             return Reason.HIGH_SLIPPAGE
         moved = book.best_ask - ev.expected_price
@@ -473,12 +602,16 @@ class StrategyEngine:
             return Reason.LOW_LIQUIDITY
         return None
 
-    def to_order(self, ev: Evaluation) -> Order:
+    def to_order(self, ev: Evaluation, now_ms: float | None = None) -> Order:
+        maker = self.cfg.maker_entry
         return Order(
             token_id=ev.token_id, side=Side.BUY, price=ev.limit_price, size=ev.size,
-            tif=TimeInForce.FOK, expected_price=ev.expected_price, fair_at_decision=ev.p_used,
+            tif=TimeInForce.GTC if maker else TimeInForce.FOK,
+            expected_price=ev.expected_price, fair_at_decision=ev.p_used,
+            expires_ts=(now_ms + self.cfg.maker_ttl_s * 1000.0) if (maker and now_ms is not None) else 0.0,
             tag=f"{ev.side} p={ev.p_used:.3f} edge={ev.net_edge:+.3f} conf={ev.confidence:.2f} "
-                f"ofi={0.0 if math.isnan(ev.ofi_score) else ev.ofi_score:+.2f}",
+                f"ofi={0.0 if math.isnan(ev.ofi_score) else ev.ofi_score:+.2f}"
+                f"{' maker' if maker else ''}",
         )
 
     def snapshot(self) -> dict:

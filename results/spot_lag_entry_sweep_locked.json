@@ -1,0 +1,60 @@
+{
+ "candidates": {
+  "risk-adjusted (training t)": [
+   2.5,
+   0.04,
+   0.04,
+   0.04,
+   0.6,
+   90.0,
+   240.0
+  ],
+  "plateau (neighbour-averaged training t)": [
+   2.5,
+   0.04,
+   0.04,
+   0.03,
+   0.6,
+   90.0,
+   240.0
+  ],
+  "high-volume (most fills, t >= 2)": [
+   2.5,
+   0.0,
+   0.04,
+   0.05,
+   0.95,
+   90.0,
+   295.0
+  ],
+  "high-quality (c/share)": [
+   4.0,
+   0.01,
+   0.03,
+   0.02,
+   0.5,
+   60.0,
+   200.0
+  ],
+  "edge and MAX_ASK only (rest as live)": [
+   3.0,
+   0.02,
+   0.02,
+   0.03,
+   0.74,
+   60.0,
+   295.0
+  ]
+ },
+ "locked_at": "2026-09-25 02:25:09 UTC",
+ "keys": [
+  "k",
+  "edge",
+  "slip",
+  "spread",
+  "max_ask",
+  "min_left",
+  "max_left"
+ ],
+ "rule": "TRAINING >= 30 fills, net > 0; VALIDATION >= 5 fills and net > 0"
+}

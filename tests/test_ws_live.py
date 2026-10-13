@@ -18,7 +18,7 @@ from http.server import ThreadingHTTPServer
 import pytest
 import websockets
 
-from troll_poly_bot.web import server as srv
+from troll_poly_bot.web import auth, server as srv
 
 SLUG = "btc-updown-5m-1"
 
@@ -70,16 +70,27 @@ def _state(points):
 
 @pytest.fixture()
 def live_server(tmp_path, monkeypatch):
-    """A real ThreadingHTTPServer on an ephemeral port, with a writable state."""
+    """A real ThreadingHTTPServer on an ephemeral port, with a writable state.
+
+    /ws is behind the login gate like everything else, so the fixture holds a
+    session and hands out the Cookie header a browser would send on the
+    upgrade. Tests about the push protocol should not also be re-testing the
+    gate -- tests/test_auth.py covers that /ws refuses an anonymous caller.
+    """
     state = tmp_path / "live_state.json"
     monkeypatch.setattr(srv, "LIVE_STATE", state)
     monkeypatch.setattr(srv, "WS_WATCH_S", 0.005)
+    monkeypatch.setattr(srv, "SESSIONS", auth.Sessions())
+    monkeypatch.setattr(srv, "CREDENTIALS",
+                        auth.Credentials("admin@example.com",
+                                         auth.hash_password("pw", rounds=1000)))
+    headers = {"Cookie": f"{auth.COOKIE}={srv.SESSIONS.create('admin@example.com')}"}
     writer = _Writer(state)
 
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), srv.Handler)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     try:
-        yield f"ws://127.0.0.1:{httpd.server_address[1]}/ws", writer
+        yield f"ws://127.0.0.1:{httpd.server_address[1]}/ws", writer, headers
     finally:
         writer.stop()
         httpd.shutdown()
@@ -109,8 +120,8 @@ async def _recv_until(conn, pred, timeout=5.0):
 
 @pytest.mark.asyncio
 async def test_a_write_is_pushed_without_being_asked(live_server):
-    url, writer = live_server
-    async with websockets.connect(f"{url}?chart={SLUG}") as conn:
+    url, writer, headers = live_server
+    async with websockets.connect(f"{url}?chart={SLUG}", additional_headers=headers) as conn:
         first = await _recv(conn)
         assert first["equity"] == 100.0
         assert [p["t"] for p in first["price_history"][SLUG]] == [1, 2, 3]
@@ -118,8 +129,8 @@ async def test_a_write_is_pushed_without_being_asked(live_server):
 
 @pytest.mark.asyncio
 async def test_the_second_push_carries_only_new_points(live_server):
-    url, writer = live_server
-    async with websockets.connect(f"{url}?chart={SLUG}") as conn:
+    url, writer, headers = live_server
+    async with websockets.connect(f"{url}?chart={SLUG}", additional_headers=headers) as conn:
         await _recv(conn)                                  # full history
         writer.set([1, 2, 3, 4, 5])
         delta = await _recv_until(conn, lambda m: m["price_history"].get(SLUG))
@@ -130,8 +141,8 @@ async def test_the_second_push_carries_only_new_points(live_server):
 
 @pytest.mark.asyncio
 async def test_switching_market_resends_a_full_history(live_server):
-    url, writer = live_server
-    async with websockets.connect(f"{url}?chart={SLUG}") as conn:
+    url, writer, headers = live_server
+    async with websockets.connect(f"{url}?chart={SLUG}", additional_headers=headers) as conn:
         await _recv(conn)
         await conn.send(json.dumps({"chart": "eth-updown-5m-1"}))
         await asyncio.sleep(0.1)                           # let the reader apply it
@@ -144,8 +155,8 @@ async def test_switching_market_resends_a_full_history(live_server):
 
 @pytest.mark.asyncio
 async def test_no_selection_means_no_history_is_pushed(live_server):
-    url, writer = live_server
-    async with websockets.connect(url) as conn:
+    url, writer, headers = live_server
+    async with websockets.connect(url, additional_headers=headers) as conn:
         first = await _recv(conn)              # the push every connect opens with
         assert first["price_history"] == {}, "nothing selected, so no points"
         writer.set([1, 2, 3, 4])
@@ -158,8 +169,8 @@ async def test_no_selection_means_no_history_is_pushed(live_server):
 @pytest.mark.asyncio
 async def test_the_socket_survives_an_unchanged_state(live_server):
     """No write, no push -- and the connection must stay open through it."""
-    url, writer = live_server
-    async with websockets.connect(f"{url}?chart={SLUG}") as conn:
+    url, writer, headers = live_server
+    async with websockets.connect(f"{url}?chart={SLUG}", additional_headers=headers) as conn:
         await _recv(conn)
         writer.paused = True
         await asyncio.sleep(0.2)               # drain anything already in flight
@@ -178,8 +189,8 @@ async def test_the_socket_survives_an_unchanged_state(live_server):
 
 @pytest.mark.asyncio
 async def test_garbage_from_the_client_does_not_kill_the_stream(live_server):
-    url, writer = live_server
-    async with websockets.connect(f"{url}?chart={SLUG}") as conn:
+    url, writer, headers = live_server
+    async with websockets.connect(f"{url}?chart={SLUG}", additional_headers=headers) as conn:
         await _recv(conn)
         await conn.send("not json at all")
         await conn.send(json.dumps(["unexpected", "shape"]))
@@ -191,13 +202,14 @@ async def test_garbage_from_the_client_does_not_kill_the_stream(live_server):
 @pytest.mark.asyncio
 async def test_a_plain_get_on_ws_is_a_400_not_a_crash(live_server):
     """Hitting /ws in a browser address bar must not take the server down."""
-    url, _writer = live_server
+    url, _writer, headers = live_server
     http = url.replace("ws://", "http://")
     reader = await asyncio.get_running_loop().run_in_executor(
         None, lambda: __import__("urllib.request", fromlist=["request"]))
     import urllib.error
     import urllib.request
+    req = urllib.request.Request(http, headers=headers)
     with pytest.raises(urllib.error.HTTPError) as exc:
         await asyncio.get_running_loop().run_in_executor(
-            None, lambda: urllib.request.urlopen(http, timeout=5))
+            None, lambda: urllib.request.urlopen(req, timeout=5))
     assert exc.value.code == 400

@@ -18,3 +18,17 @@ data/research/
 data/KILL
 data/controls.json
 data/charts_index.json
+
+# high-resolution tick recordings (scripts/record_ticks.py): large, research only
+data/ticks/
+
+# spot-shock replay feature cache (backtest/spot_shock_replay.py), rebuilt from data/charts
+data/replay/spot_shock_cache/
+data/replay/rm_research_cache/
+data/replay/rm_research/*.npz
+data# large regenerable sweep outputs (GitHub rejects blobs over 100 MB)
+results/next_market_sweep.csv
+results/open_micro_sweep.csv
+results/60s_snipe_sweep.csv
+results/spot_lag_entry_sweep.csv
+results/*.pkl

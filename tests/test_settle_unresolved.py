@@ -20,7 +20,8 @@ SLUG = "btc-updown-5m-1"
 def _bot(tmp_path):
     return LiveBot(assets=("BTC",),
                    state_path=str(tmp_path / "state.json"),
-                   trade_log=str(tmp_path / "trades.jsonl"))
+                   trade_log=str(tmp_path / "trades.jsonl"),
+                   earnings_path=str(tmp_path / "earnings.jsonl"))
 
 
 def _live_market(strike: float = 0.0):

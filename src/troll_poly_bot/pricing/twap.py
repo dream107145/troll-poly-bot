@@ -80,8 +80,9 @@ Caveats worth keeping in view
 """
 from __future__ import annotations
 
+import bisect
+import itertools
 import math
-from collections import deque
 from dataclasses import dataclass, field
 
 from .digital import DEFAULT_PRICER, FairValue, Pricer
@@ -110,23 +111,49 @@ class TwapState:
     Feed it every oracle tick. Before the settling window opens it just holds
     the latest price; once inside, it accumulates the time-weighted integral
     that is already locked in.
+
+    The integral over any range is answered from prefix sums: ``_cum[i]`` is
+    the trapezoidal integral of log price from the first kept sample to sample
+    ``i``, so a window is one subtraction plus the two partial pairs at its
+    edges. The loop it replaced walked every sample in the window (about a
+    thousand at ten spot updates a second) for every market on every tick,
+    and was a tenth of the live bot's CPU on 2026-09-29.
     """
 
     window_s: float = TWAP_WINDOW_S
-    #: (ts_ms, log_price) samples, trimmed to the window
-    _samples: deque = field(default_factory=deque)
+    #: (ts_ms, log_price) samples, trimmed to twice the window
+    _samples: list = field(default_factory=list)
+    #: prefix trapezoid integrals in log-price * seconds, one per sample
+    _cum: list = field(default_factory=list)
     _last_px: float = 0.0
     _last_ts: float = 0.0
+    #: samples arrived in time order (lets _integrate bisect into the window;
+    #: an out-of-order sample turns that off and the plain walk takes over)
+    _ordered: bool = True
 
     def update(self, price: float, ts_ms: float) -> None:
         if price <= 0.0:
             return
+        s, c = self._samples, self._cum
+        lp = math.log(price)
+        if s:
+            t_prev, v_prev = s[-1]
+            if ts_ms < t_prev:
+                self._ordered = False
+            span = ts_ms - t_prev
+            c.append(c[-1] + (0.5 * (v_prev + lp) * span / 1000.0 if span > 0.0 else 0.0))
+        else:
+            c.append(0.0)
         self._last_px = price
         self._last_ts = ts_ms
-        self._samples.append((ts_ms, math.log(price)))
+        s.append((ts_ms, lp))
         cutoff = ts_ms - self.window_s * 1000.0 * 2.0
-        while self._samples and self._samples[0][0] < cutoff:
-            self._samples.popleft()
+        k, n = 0, len(s)
+        while k < n and s[k][0] < cutoff:
+            k += 1
+        if k:
+            del s[:k]
+            del c[:k]
 
     @property
     def ready(self) -> bool:
@@ -141,10 +168,10 @@ class TwapState:
         return None if lm is None else math.exp(lm)
 
     def coverage_s(self, now_ms: float) -> float:
-        """Seconds of the trailing window actually backed by observations.
+        """Seconds of the trailing window that samples actually cover.
 
-        A strike taken from a partial window is not the venue's strike. On a
-        trending market a short window sits closer to the latest price, so the
+        A TWAP computed from partial coverage is biased toward the tail
+        that happens to be sampled; when the feed only just started, the
         strike comes out biased in the direction of the trend -- and stays
         biased for the whole five minutes. Callers must refuse to strike until
         this reaches the full window.
@@ -166,7 +193,13 @@ class TwapState:
 
     def observed_range(self, start_ms: float, now_ms: float) -> tuple[float | None, float | None]:
         """Min/max observed log price in a window -- bounds for the mean."""
-        vals = [v for t, v in self._samples if start_ms <= t <= now_ms]
+        s = self._samples
+        if self._ordered:
+            lo = bisect.bisect_left(s, (start_ms, -math.inf))
+            hi = bisect.bisect_right(s, (now_ms, math.inf))
+            vals = [v for _, v in itertools.islice(s, lo, hi)]
+        else:
+            vals = [v for t, v in s if start_ms <= t <= now_ms]
         if not vals:
             return None, None
         return min(vals), max(vals)
@@ -175,19 +208,58 @@ class TwapState:
         """Locked-in part of the settling average: (integral, seconds covered)."""
         return self._integrate(start_ms, now_ms)
 
+    def _piece(self, i: int, lo: float, hi: float) -> float:
+        """The integral of the linear segment between samples i and i+1 over [lo, hi]."""
+        t0, v0 = self._samples[i]
+        t1, v1 = self._samples[i + 1]
+        lo, hi = max(t0, lo), min(t1, hi)
+        span = t1 - t0
+        if hi <= lo or span <= 0.0:
+            return 0.0
+        f0 = v0 + (v1 - v0) * (lo - t0) / span
+        f1 = v0 + (v1 - v0) * (hi - t0) / span
+        return 0.5 * (f0 + f1) * (hi - lo) / 1000.0
+
     def _integrate(self, a_ms: float, b_ms: float) -> tuple[float, float]:
         """Trapezoidal integral of log price over [a, b], in log-price*seconds."""
-        if b_ms <= a_ms or not self._samples:
+        s = self._samples
+        if b_ms <= a_ms or not s:
             return 0.0, 0.0
-        pts = list(self._samples)
-        # clamp/extend with step-held values at the edges
+        if not self._ordered:
+            return self._integrate_walk(a_ms, b_ms)
+        n = len(s)
+        t_first = s[0][0]
+        t_last, v_last = s[-1]
+        total = 0.0
+        if a_ms < t_last:
+            p = bisect.bisect_left(s, (a_ms, -math.inf))          # first sample at or after a
+            q = bisect.bisect_right(s, (b_ms, math.inf)) - 1      # last sample at or before b
+            if p <= q:
+                if p < q:
+                    total += self._cum[q] - self._cum[p]          # the pairs wholly inside [a, b]
+                if p > 0:
+                    total += self._piece(p - 1, a_ms, s[p][0])    # a cuts the pair before p
+                if q + 1 < n:
+                    total += self._piece(q, s[q][0], b_ms)        # b cuts the pair after q
+            elif p > 0:
+                total += self._piece(p - 1, a_ms, b_ms)           # a and b inside one pair
+        covered = max(0.0, (min(b_ms, t_last) - max(a_ms, t_first)) / 1000.0)
+        # hold the last observed value forward to `b`
+        if b_ms > max(t_last, a_ms):
+            lo = max(t_last, a_ms)
+            total += v_last * (b_ms - lo) / 1000.0
+            covered += (b_ms - lo) / 1000.0
+        return total, covered
+
+    def _integrate_walk(self, a_ms: float, b_ms: float) -> tuple[float, float]:
+        """The pair-by-pair walk, kept for samples that did not arrive in order."""
+        pts = self._samples
         total = 0.0
         covered = 0.0
         for (t0, v0), (t1, v1) in zip(pts, pts[1:]):
             lo, hi = max(t0, a_ms), min(t1, b_ms)
             if hi <= lo:
                 continue
-            # linear interpolation across the sample interval
             span = t1 - t0
             if span <= 0:
                 continue
@@ -195,7 +267,6 @@ class TwapState:
             f1 = v0 + (v1 - v0) * (hi - t0) / span
             total += 0.5 * (f0 + f1) * (hi - lo) / 1000.0
             covered += (hi - lo) / 1000.0
-        # hold the last observed value forward to `b`
         t_last, v_last = pts[-1]
         if b_ms > max(t_last, a_ms):
             lo = max(t_last, a_ms)

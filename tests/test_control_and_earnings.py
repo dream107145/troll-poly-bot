@@ -23,13 +23,25 @@ def ms(dt: datetime) -> float:
 
 
 def test_every_tunable_points_at_a_real_attribute():
+    from troll_poly_bot.graduation import MicroCaps
+    from troll_poly_bot.strategy.pairlock_recovery import RecoveryParams
     cfg = BotConfig()
     caps = LiveCaps()
-    holders = {"engine": cfg.engine, "risk": cfg.risk, "caps": caps}
+    holders = {"engine": cfg.engine, "risk": cfg.risk, "caps": caps, "spot_lag": cfg.spot_lag,
+               "micro": MicroCaps(), "triangle": cfg.triangle, "pairlock": RecoveryParams(),
+               "pairbtc": RecoveryParams()}
     for key, t in TUNABLES.items():
         assert t.target in holders, key
         assert hasattr(holders[t.target], t.attr), key
         assert t.lo < t.hi and t.label and t.help, key
+        # the kind matches what the bot stores, so a set value is never the wrong type
+        cur = getattr(holders[t.target], t.attr)
+        want = {"bool": bool, "int": int, "float": (int, float), "choice": str, "list": str}[t.kind]
+        assert isinstance(cur, want) and (t.kind == "bool") == isinstance(cur, bool), key
+        if t.kind == "choice":
+            assert cur in t.options, key
+        if t.kind in ("float", "int"):
+            assert t.lo <= cur <= t.hi or t.target in ("caps", "risk"), (key, cur)
     # the catalogue the UI renders covers all of them exactly once
     keys = [row["key"] for row in spec()]
     assert sorted(keys) == sorted(TUNABLES)

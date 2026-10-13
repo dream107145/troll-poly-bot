@@ -1,0 +1,34 @@
+{
+ "candidates": {
+  "risk-adjusted (MAX_ASK + exit)": [
+   0.64,
+   "tp2_settle"
+  ],
+  "high-volume": [
+   0.95,
+   "gap_closed_30"
+  ],
+  "high-quality": [
+   0.5,
+   "t20"
+  ],
+  "low-drawdown": [
+   0.64,
+   "tp2_settle"
+  ],
+  "MAX_ASK only (live exit)": [
+   0.74,
+   "live"
+  ],
+  "exit only (MAX_ASK 0.95)": [
+   0.95,
+   "edge_gone_10"
+  ]
+ },
+ "baseline": [
+  0.95,
+  "live"
+ ],
+ "rule": "TRAINING: >= 30 fills, net > 0; categories by training t-stat / fills (t >= 2) / net per share / net-to-drawdown (t >= 2); VALIDATION removes any pick with net <= 0 (next training candidate)",
+ "locked_at": "2026-09-25 01:01:19 UTC"
+}

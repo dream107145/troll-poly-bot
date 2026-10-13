@@ -17,7 +17,20 @@ from dataclasses import dataclass, field
 from .execution.latency import PROFILES, LatencyProfile
 from .market.discovery import CANDIDATE_ASSETS
 from .risk.limits import RiskConfig
+from .strategy.btc_hedge import BtcHedgeConfig
+from .strategy.cheapside import CheapSideConfig
+from .strategy.late_confidence import LateConfidenceConfig
+from .strategy.book_momentum import BookMomentumConfig
+from .strategy.rising_recovery import RisingRecoveryConfig
+from .strategy.confirmation_momentum import CMConfig
+from .strategy.preopen_maker import POMConfig
+from .strategy.copytrade import CopyConfig
 from .strategy.engine import EngineConfig
+from .strategy.fastclip import FastClipConfig
+from .strategy.triangle import TriangleConfig
+from .strategy.momentum import MomentumConfig
+from .strategy.repriced_momentum import RepricedMomentumConfig
+from .strategy.spot_lag import SpotLagConfig
 
 
 @dataclass(slots=True)
@@ -106,10 +119,45 @@ class BotConfig:
     latency_profile: str = "home_broadband"
     latency_seed: int = 7
     starting_balance: float = 100.0
+    #: how much of the displayed book the paper engine believes
+    #: (execution/scenarios.py): optimistic | realistic | conservative | stress
+    execution_scenario: str = "realistic"
+    #: deployment mode label: paper | shadow | micro-live | live (graduation.py)
+    deploy_mode: str = "paper"
+    #: how often the state file is rewritten. It carries every live window's
+    #: price path (5 MB after an hour); at 0.1 s that serialisation starved
+    #: the venue websocket reader ("1013 slow consumer", 5 drops in 23 min)
+    state_interval_s: float = 0.25
 
     strategy: StrategyConfig = field(default_factory=StrategyConfig)   # legacy sim
     fees: FeeConfig = field(default_factory=FeeConfig)                 # legacy sim
     engine: EngineConfig = field(default_factory=EngineConfig)
+    #: the experimental MOMENTUM_TAKER's own knobs (used when engine.strategy says so)
+    momentum: MomentumConfig = field(default_factory=MomentumConfig.from_env)
+    #: the experimental SPOT_LAG's knobs and its feature flag (TPB_SPOT_LAG_*)
+    spot_lag: SpotLagConfig = field(default_factory=SpotLagConfig.from_env)
+    #: the experimental REPRICED_MOMENTUM's knobs and its feature flag (TPB_REPRICED_MOM_*)
+    repriced_momentum: RepricedMomentumConfig = field(default_factory=RepricedMomentumConfig.from_env)
+    #: the experimental CHEAPSIDE's knobs and its feature flag (TPB_CHEAPSIDE_*); paper only
+    cheapside: CheapSideConfig = field(default_factory=CheapSideConfig.from_env)
+    #: the experimental LATE_CONFIDENCE's knobs and its feature flag (TPB_LATECONF_*); paper only
+    late_confidence: LateConfidenceConfig = field(default_factory=LateConfidenceConfig.from_env)
+    #: the experimental BOOK_MOMENTUM's knobs and its feature flag (TPB_BOOKMOM_*); paper only
+    book_momentum: BookMomentumConfig = field(default_factory=BookMomentumConfig.from_env)
+    #: the experimental RISING-TOKEN RECOVERY's knobs and its feature flag (TPB_RTR_*); paper only
+    rising_recovery: RisingRecoveryConfig = field(default_factory=RisingRecoveryConfig.from_env)
+    #: the experimental BTC_CONFIRMATION_MOMENTUM's knobs and its feature flag (TPB_CM_*); paper only
+    confirmation_momentum: CMConfig = field(default_factory=CMConfig.from_env)
+    #: the experimental PREOPEN_MAKER's knobs and its feature flag (TPB_POM_*); paper only
+    preopen_maker: POMConfig = field(default_factory=POMConfig.from_env)
+    #: the experimental COPYTRADE's knobs and its feature flag (TPB_COPY_*); paper only
+    copytrade: CopyConfig = field(default_factory=CopyConfig.from_env)
+    #: the experimental FASTCLIP's knobs and its feature flag (TPB_FASTCLIP_*); paper only
+    fastclip: FastClipConfig = field(default_factory=FastClipConfig.from_env)
+    #: the experimental BTC_TREND_REVERSAL_HEDGE's knobs and flag (TPB_BTC_HEDGE_*); paper only
+    btc_hedge: BtcHedgeConfig = field(default_factory=BtcHedgeConfig.from_env)
+    #: the experimental TRIANGLE's knobs and flag (TPB_TRIANGLE_*); paper only
+    triangle: TriangleConfig = field(default_factory=TriangleConfig.from_env)
     risk: RiskConfig = field(default_factory=RiskConfig)
     vol: VolConfig = field(default_factory=VolConfig)
     feeds: FeedConfig = field(default_factory=FeedConfig)
@@ -151,6 +199,8 @@ class BotConfig:
             os.getenv("TPB_STARTING_BALANCE", cfg.starting_balance)
         )
         cfg.log_level = os.getenv("TPB_LOG_LEVEL", cfg.log_level)
+        cfg.execution_scenario = os.getenv("TPB_EXECUTION_SCENARIO", cfg.execution_scenario)
+        cfg.engine.strategy = os.getenv("TPB_STRATEGY", cfg.engine.strategy)
         if cfg.mode not in ("paper", "live"):
             raise SystemExit(f"TPB_MODE must be paper or live, not {cfg.mode!r}")
         if cfg.mode == "live":

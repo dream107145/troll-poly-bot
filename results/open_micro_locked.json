@@ -1,0 +1,1146 @@
+{
+ "locked_at_utc": "2026-09-25T16:11:51",
+ "stats": {
+  "configs": 126720,
+  "train_volume": 18648,
+  "train_positive": 200,
+  "pass_defenses": 0,
+  "pass_neighbours": 0
+ },
+ "locked": [
+  {
+   "label": "best TRAIN taker",
+   "key": {
+    "model": "D_twap",
+    "delay": 0.25,
+    "min_edge": 0.01,
+    "side_rule": "ev",
+    "max_spread": 0.03,
+    "min_score": -9.0,
+    "maker_level": "",
+    "rest": 1.0,
+    "then_taker": 0.0,
+    "exit": "settlement"
+   },
+   "train": {
+    "model": "D_twap",
+    "tau": -3.0,
+    "win": 0.0,
+    "min_edge": 0.01,
+    "min_prob": 0.5,
+    "max_spread": 0.03,
+    "max_ask": 0.99,
+    "min_ask": 0.02,
+    "usd": 5.0,
+    "depth_frac": 1.0,
+    "entry": "fok0",
+    "qmove": 9.0,
+    "lat": "real",
+    "lat_scale": 1.0,
+    "lat_extra": 0.0,
+    "edge_hold": 3.0,
+    "adverse": 0.005,
+    "sides": "both",
+    "delay": 0.25,
+    "side_rule": "ev",
+    "maker_level": "",
+    "rest": 1.0,
+    "hazard": 0.015,
+    "then_taker": 0.0,
+    "min_score": -9.0,
+    "exit": "settlement",
+    "split": "train",
+    "orders": 65.0,
+    "trades": 32.0,
+    "fill": 0.49230769230769234,
+    "win_rate": 0.65625,
+    "avg_entry": 0.589375,
+    "avg_exit": 0.65625,
+    "hold_s": 299.57581621236363,
+    "gross": 19.433099999999996,
+    "fees": 4.50215465,
+    "slip": -2.8947999999999965,
+    "net": 14.930945349999998,
+    "net_trade": 0.46659204218749994,
+    "c_share": 5.046349999999998,
+    "t": 0.5960642722768856,
+    "dd": 14.78066361,
+    "sharpe_day": 1.93662841471309,
+    "shares": 272.16999999999996,
+    "top_asset_share": 0.8355837234378465,
+    "up_share": 0.5625,
+    "net_wo_best": 8.38948959,
+    "gross_c": 6.687499999999999
+   },
+   "validation": {
+    "model": "D_twap",
+    "tau": -3.0,
+    "win": 0.0,
+    "min_edge": 0.01,
+    "min_prob": 0.5,
+    "max_spread": 0.03,
+    "max_ask": 0.99,
+    "min_ask": 0.02,
+    "usd": 5.0,
+    "depth_frac": 1.0,
+    "entry": "fok0",
+    "qmove": 9.0,
+    "lat": "real",
+    "lat_scale": 1.0,
+    "lat_extra": 0.0,
+    "edge_hold": 3.0,
+    "adverse": 0.005,
+    "sides": "both",
+    "delay": 0.25,
+    "side_rule": "ev",
+    "maker_level": "",
+    "rest": 1.0,
+    "hazard": 0.015,
+    "then_taker": 0.0,
+    "min_score": -9.0,
+    "exit": "settlement",
+    "split": "validation",
+    "orders": 10.0,
+    "trades": 4.0,
+    "fill": 0.4,
+    "win_rate": 1.0,
+    "avg_entry": 0.585,
+    "avg_exit": 1.0,
+    "hold_s": 299.58620258581334,
+    "gross": 15.3861,
+    "fees": 0.58058595,
+    "slip": -1.3072876114961219e-15,
+    "net": 14.805514050000001,
+    "net_trade": 3.7013785125000003,
+    "c_share": 39.890350000000005,
+    "t": 6.203161147859188,
+    "dd": 0.0,
+    "sharpe_day": 41.01815848464905,
+    "shares": 35.370000000000005,
+    "top_asset_share": 0.66069591484397,
+    "up_share": 1.0,
+    "net_wo_best": 9.57419757,
+    "gross_c": 41.5
+   },
+   "defenses_failed": [
+    "TRAIN t < 1.5",
+    "one asset > 60 % of |P&L|",
+    "VALIDATION < 10 trades"
+   ]
+  },
+  {
+   "label": "best TRAIN taker",
+   "key": {
+    "model": "D_twap",
+    "delay": 0.25,
+    "min_edge": 0.01,
+    "side_rule": "ev",
+    "max_spread": 0.03,
+    "min_score": 2.0,
+    "maker_level": "",
+    "rest": 1.0,
+    "then_taker": 0.0,
+    "exit": "settlement"
+   },
+   "train": {
+    "model": "D_twap",
+    "tau": -3.0,
+    "win": 0.0,
+    "min_edge": 0.01,
+    "min_prob": 0.5,
+    "max_spread": 0.03,
+    "max_ask": 0.99,
+    "min_ask": 0.02,
+    "usd": 5.0,
+    "depth_frac": 1.0,
+    "entry": "fok0",
+    "qmove": 9.0,
+    "lat": "real",
+    "lat_scale": 1.0,
+    "lat_extra": 0.0,
+    "edge_hold": 3.0,
+    "adverse": 0.005,
+    "sides": "both",
+    "delay": 0.25,
+    "side_rule": "ev",
+    "maker_level": "",
+    "rest": 1.0,
+    "hazard": 0.015,
+    "then_taker": 0.0,
+    "min_score": 2.0,
+    "exit": "settlement",
+    "split": "train",
+    "orders": 65.0,
+    "trades": 32.0,
+    "fill": 0.49230769230769234,
+    "win_rate": 0.65625,
+    "avg_entry": 0.589375,
+    "avg_exit": 0.65625,
+    "hold_s": 299.57581621236363,
+    "gross": 19.433099999999996,
+    "fees": 4.50215465,
+    "slip": -2.8947999999999965,
+    "net": 14.930945349999998,
+    "net_trade": 0.46659204218749994,
+    "c_share": 5.046349999999998,
+    "t": 0.5960642722768856,
+    "dd": 14.78066361,
+    "sharpe_day": 1.93662841471309,
+    "shares": 272.16999999999996,
+    "top_asset_share": 0.8355837234378465,
+    "up_share": 0.5625,
+    "net_wo_best": 8.38948959,
+    "gross_c": 6.687499999999999
+   },
+   "validation": {
+    "model": "D_twap",
+    "tau": -3.0,
+    "win": 0.0,
+    "min_edge": 0.01,
+    "min_prob": 0.5,
+    "max_spread": 0.03,
+    "max_ask": 0.99,
+    "min_ask": 0.02,
+    "usd": 5.0,
+    "depth_frac": 1.0,
+    "entry": "fok0",
+    "qmove": 9.0,
+    "lat": "real",
+    "lat_scale": 1.0,
+    "lat_extra": 0.0,
+    "edge_hold": 3.0,
+    "adverse": 0.005,
+    "sides": "both",
+    "delay": 0.25,
+    "side_rule": "ev",
+    "maker_level": "",
+    "rest": 1.0,
+    "hazard": 0.015,
+    "then_taker": 0.0,
+    "min_score": 2.0,
+    "exit": "settlement",
+    "split": "validation",
+    "orders": 10.0,
+    "trades": 4.0,
+    "fill": 0.4,
+    "win_rate": 1.0,
+    "avg_entry": 0.585,
+    "avg_exit": 1.0,
+    "hold_s": 299.58620258581334,
+    "gross": 15.3861,
+    "fees": 0.58058595,
+    "slip": -1.3072876114961219e-15,
+    "net": 14.805514050000001,
+    "net_trade": 3.7013785125000003,
+    "c_share": 39.890350000000005,
+    "t": 6.203161147859188,
+    "dd": 0.0,
+    "sharpe_day": 41.01815848464905,
+    "shares": 35.370000000000005,
+    "top_asset_share": 0.66069591484397,
+    "up_share": 1.0,
+    "net_wo_best": 9.57419757,
+    "gross_c": 41.5
+   },
+   "defenses_failed": [
+    "TRAIN t < 1.5",
+    "one asset > 60 % of |P&L|",
+    "VALIDATION < 10 trades"
+   ]
+  },
+  {
+   "label": "best TRAIN maker",
+   "key": {
+    "model": "ADAPT",
+    "delay": 0.5,
+    "min_edge": -9.0,
+    "side_rule": "model",
+    "max_spread": 9.0,
+    "min_score": -9.0,
+    "maker_level": "fair-10",
+    "rest": 0.25,
+    "then_taker": 1.0,
+    "exit": "settlement"
+   },
+   "train": {
+    "model": "ADAPT",
+    "tau": -3.0,
+    "win": 0.0,
+    "min_edge": -9.0,
+    "min_prob": 0.5,
+    "max_spread": 9.0,
+    "max_ask": 0.99,
+    "min_ask": 0.02,
+    "usd": 5.0,
+    "depth_frac": 1.0,
+    "entry": "fok0",
+    "qmove": 9.0,
+    "lat": "real",
+    "lat_scale": 1.0,
+    "lat_extra": 0.0,
+    "edge_hold": 3.0,
+    "adverse": 0.005,
+    "sides": "both",
+    "delay": 0.5,
+    "side_rule": "model",
+    "maker_level": "fair-10",
+    "rest": 0.25,
+    "hazard": 0.015,
+    "then_taker": 1.0,
+    "min_score": -9.0,
+    "exit": "settlement",
+    "split": "train",
+    "orders": 1723.0,
+    "trades": 32.0,
+    "fill": 0.01857225769007545,
+    "win_rate": 0.5625,
+    "avg_entry": 0.47624999999999995,
+    "avg_exit": 0.5625,
+    "hold_s": 299.121606904545,
+    "gross": 23.9966,
+    "fees": 1.23349324,
+    "slip": -22.384900000000002,
+    "net": 22.76310676,
+    "net_trade": 0.71134708625,
+    "c_share": 8.215390625000001,
+    "t": 0.8973921238592004,
+    "dd": 13.125,
+    "sharpe_day": 2.5943710531435564,
+    "shares": 296.20000000000005,
+    "top_asset_share": 0.29934156877046153,
+    "up_share": 0.34375,
+    "net_wo_best": 16.02990676,
+    "gross_c": 8.625
+   },
+   "validation": {
+    "model": "ADAPT",
+    "tau": -3.0,
+    "win": 0.0,
+    "min_edge": -9.0,
+    "min_prob": 0.5,
+    "max_spread": 9.0,
+    "max_ask": 0.99,
+    "min_ask": 0.02,
+    "usd": 5.0,
+    "depth_frac": 1.0,
+    "entry": "fok0",
+    "qmove": 9.0,
+    "lat": "real",
+    "lat_scale": 1.0,
+    "lat_extra": 0.0,
+    "edge_hold": 3.0,
+    "adverse": 0.005,
+    "sides": "both",
+    "delay": 0.5,
+    "side_rule": "model",
+    "maker_level": "fair-10",
+    "rest": 0.25,
+    "hazard": 0.015,
+    "then_taker": 1.0,
+    "min_score": -9.0,
+    "exit": "settlement",
+    "split": "validation",
+    "orders": 574.0,
+    "trades": 10.0,
+    "fill": 0.017421602787456445,
+    "win_rate": 0.3,
+    "avg_entry": 0.485,
+    "avg_exit": 0.3,
+    "hold_s": 299.1276022734985,
+    "gross": -21.2819,
+    "fees": 0.5726960400000001,
+    "slip": -6.408099999999999,
+    "net": -21.854596039999997,
+    "net_trade": -2.1854596039999996,
+    "c_share": -19.00904,
+    "t": -1.2063547079281267,
+    "dd": 29.698696039999998,
+    "sharpe_day": -8.657748142041921,
+    "shares": 92.25999999999999,
+    "top_asset_share": 0.4111789276670863,
+    "up_share": 0.2,
+    "net_wo_best": -26.513096039999997,
+    "gross_c": -18.5
+   },
+   "defenses_failed": [
+    "TRAIN t < 1.5",
+    "VALIDATION <= 0"
+   ]
+  },
+  {
+   "label": "best TRAIN maker",
+   "key": {
+    "model": "PRE",
+    "delay": 0.5,
+    "min_edge": -9.0,
+    "side_rule": "model",
+    "max_spread": 9.0,
+    "min_score": -9.0,
+    "maker_level": "fair-10",
+    "rest": 0.25,
+    "then_taker": 1.0,
+    "exit": "settlement"
+   },
+   "train": {
+    "model": "PRE",
+    "tau": -3.0,
+    "win": 0.0,
+    "min_edge": -9.0,
+    "min_prob": 0.5,
+    "max_spread": 9.0,
+    "max_ask": 0.99,
+    "min_ask": 0.02,
+    "usd": 5.0,
+    "depth_frac": 1.0,
+    "entry": "fok0",
+    "qmove": 9.0,
+    "lat": "real",
+    "lat_scale": 1.0,
+    "lat_extra": 0.0,
+    "edge_hold": 3.0,
+    "adverse": 0.005,
+    "sides": "both",
+    "delay": 0.5,
+    "side_rule": "model",
+    "maker_level": "fair-10",
+    "rest": 0.25,
+    "hazard": 0.015,
+    "then_taker": 1.0,
+    "min_score": -9.0,
+    "exit": "settlement",
+    "split": "train",
+    "orders": 1728.0,
+    "trades": 48.0,
+    "fill": 0.027777777777777776,
+    "win_rate": 0.5833333333333334,
+    "avg_entry": 0.505,
+    "avg_exit": 0.5833333333333334,
+    "hold_s": 299.11121608538616,
+    "gross": 30.5971,
+    "fees": 3.29382179,
+    "slip": -24.5302,
+    "net": 27.303278210000002,
+    "net_trade": 0.5688182960416667,
+    "c_share": 7.054043749999999,
+    "t": 1.0013142672604178,
+    "dd": 22.563275920000002,
+    "sharpe_day": 2.258384021921947,
+    "shares": 433.56999999999994,
+    "top_asset_share": 0.5116360901873912,
+    "up_share": 0.6458333333333334,
+    "net_wo_best": 21.26547821,
+    "gross_c": 7.833333333333333
+   },
+   "validation": {
+    "model": "PRE",
+    "tau": -3.0,
+    "win": 0.0,
+    "min_edge": -9.0,
+    "min_prob": 0.5,
+    "max_spread": 9.0,
+    "max_ask": 0.99,
+    "min_ask": 0.02,
+    "usd": 5.0,
+    "depth_frac": 1.0,
+    "entry": "fok0",
+    "qmove": 9.0,
+    "lat": "real",
+    "lat_scale": 1.0,
+    "lat_extra": 0.0,
+    "edge_hold": 3.0,
+    "adverse": 0.005,
+    "sides": "both",
+    "delay": 0.5,
+    "side_rule": "model",
+    "maker_level": "fair-10",
+    "rest": 0.25,
+    "hazard": 0.015,
+    "then_taker": 1.0,
+    "min_score": -9.0,
+    "exit": "settlement",
+    "split": "validation",
+    "orders": 582.0,
+    "trades": 13.0,
+    "fill": 0.022336769759450172,
+    "win_rate": 0.46153846153846156,
+    "avg_entry": 0.506923076923077,
+    "avg_exit": 0.46153846153846156,
+    "hold_s": 299.1297086122637,
+    "gross": -6.383600000000001,
+    "fees": 0.78189307,
+    "slip": -8.5268,
+    "net": -7.16549307,
+    "net_trade": -0.5511917746153846,
+    "c_share": -5.202923076923079,
+    "t": -0.30695428955097315,
+    "dd": 22.34362176,
+    "sharpe_day": -2.049440853345856,
+    "shares": 113.00000000000001,
+    "top_asset_share": 0.45248469521293755,
+    "up_share": 0.6153846153846154,
+    "net_wo_best": -13.08351232,
+    "gross_c": -4.53846153846154
+   },
+   "defenses_failed": [
+    "TRAIN t < 1.5",
+    "VALIDATION <= 0"
+   ]
+  }
+ ],
+ "near_misses": [
+  {
+   "key": {
+    "model": "ADAPT",
+    "delay": 0.25,
+    "min_edge": -9.0,
+    "side_rule": "model",
+    "max_spread": 9.0,
+    "min_score": -9.0,
+    "maker_level": "fair-2",
+    "rest": 3.0,
+    "then_taker": 0.0,
+    "exit": "settlement"
+   },
+   "train_c": 0.6760330578512397,
+   "train_trades": 605.0,
+   "val_c": 0.06666666666666572,
+   "val_trades": 240.0,
+   "failed": [
+    "TRAIN t < 1.5"
+   ]
+  },
+  {
+   "key": {
+    "model": "ADAPT",
+    "delay": 0.25,
+    "min_edge": -9.0,
+    "side_rule": "model",
+    "max_spread": 9.0,
+    "min_score": -9.0,
+    "maker_level": "fair-2",
+    "rest": 3.0,
+    "then_taker": 1.0,
+    "exit": "settlement"
+   },
+   "train_c": 0.6760330578512397,
+   "train_trades": 605.0,
+   "val_c": 0.06666666666666572,
+   "val_trades": 240.0,
+   "failed": [
+    "TRAIN t < 1.5"
+   ]
+  },
+  {
+   "key": {
+    "model": "ADAPT",
+    "delay": 0.25,
+    "min_edge": -9.0,
+    "side_rule": "model",
+    "max_spread": 9.0,
+    "min_score": -9.0,
+    "maker_level": "fair-5",
+    "rest": 0.5,
+    "then_taker": 0.0,
+    "exit": "settlement"
+   },
+   "train_c": 1.2260869565217396,
+   "train_trades": 115.0,
+   "val_c": 0.6470588235294101,
+   "val_trades": 34.0,
+   "failed": [
+    "TRAIN t < 1.5"
+   ]
+  },
+  {
+   "key": {
+    "model": "ADAPT",
+    "delay": 0.25,
+    "min_edge": -9.0,
+    "side_rule": "model",
+    "max_spread": 9.0,
+    "min_score": -9.0,
+    "maker_level": "fair-5",
+    "rest": 0.5,
+    "then_taker": 1.0,
+    "exit": "settlement"
+   },
+   "train_c": 1.2260869565217396,
+   "train_trades": 115.0,
+   "val_c": 0.6470588235294101,
+   "val_trades": 34.0,
+   "failed": [
+    "TRAIN t < 1.5"
+   ]
+  },
+  {
+   "key": {
+    "model": "ADAPT",
+    "delay": 0.5,
+    "min_edge": -9.0,
+    "side_rule": "model",
+    "max_spread": 9.0,
+    "min_score": -9.0,
+    "maker_level": "fair-5",
+    "rest": 0.25,
+    "then_taker": 0.0,
+    "exit": "settlement"
+   },
+   "train_c": 0.5213675213675215,
+   "train_trades": 117.0,
+   "val_c": 0.9642857142857143,
+   "val_trades": 28.0,
+   "failed": [
+    "TRAIN t < 1.5",
+    "best market carries it"
+   ]
+  },
+  {
+   "key": {
+    "model": "ADAPT",
+    "delay": 0.5,
+    "min_edge": -9.0,
+    "side_rule": "model",
+    "max_spread": 9.0,
+    "min_score": -9.0,
+    "maker_level": "fair-5",
+    "rest": 0.5,
+    "then_taker": 0.0,
+    "exit": "settlement"
+   },
+   "train_c": 3.0645161290322585,
+   "train_trades": 155.0,
+   "val_c": 1.2058823529411764,
+   "val_trades": 34.0,
+   "failed": [
+    "TRAIN t < 1.5"
+   ]
+  },
+  {
+   "key": {
+    "model": "ADAPT",
+    "delay": 0.5,
+    "min_edge": -9.0,
+    "side_rule": "model",
+    "max_spread": 9.0,
+    "min_score": -9.0,
+    "maker_level": "fair-5",
+    "rest": 0.5,
+    "then_taker": 1.0,
+    "exit": "settlement"
+   },
+   "train_c": 3.0645161290322585,
+   "train_trades": 155.0,
+   "val_c": 1.2058823529411764,
+   "val_trades": 34.0,
+   "failed": [
+    "TRAIN t < 1.5"
+   ]
+  },
+  {
+   "key": {
+    "model": "ADAPT",
+    "delay": 1.0,
+    "min_edge": -9.0,
+    "side_rule": "model",
+    "max_spread": 9.0,
+    "min_score": -9.0,
+    "maker_level": "bid+1",
+    "rest": 1.0,
+    "then_taker": 0.0,
+    "exit": "settlement"
+   },
+   "train_c": 0.09475806451612881,
+   "train_trades": 496.0,
+   "val_c": 0.2045454545454552,
+   "val_trades": 176.0,
+   "failed": [
+    "TRAIN t < 1.5"
+   ]
+  },
+  {
+   "key": {
+    "model": "ADAPT",
+    "delay": 1.0,
+    "min_edge": -9.0,
+    "side_rule": "model",
+    "max_spread": 9.0,
+    "min_score": -9.0,
+    "maker_level": "bid+1",
+    "rest": 1.0,
+    "then_taker": 1.0,
+    "exit": "settlement"
+   },
+   "train_c": 0.09475806451612881,
+   "train_trades": 496.0,
+   "val_c": 0.2045454545454552,
+   "val_trades": 176.0,
+   "failed": [
+    "TRAIN t < 1.5"
+   ]
+  },
+  {
+   "key": {
+    "model": "ADAPT",
+    "delay": 1.0,
+    "min_edge": -9.0,
+    "side_rule": "model",
+    "max_spread": 9.0,
+    "min_score": -9.0,
+    "maker_level": "fair-2",
+    "rest": 2.0,
+    "then_taker": 0.0,
+    "exit": "settlement"
+   },
+   "train_c": 1.596938775510204,
+   "train_trades": 588.0,
+   "val_c": 0.5311004784688995,
+   "val_trades": 209.0,
+   "failed": [
+    "TRAIN t < 1.5"
+   ]
+  },
+  {
+   "key": {
+    "model": "ADAPT",
+    "delay": 1.0,
+    "min_edge": -9.0,
+    "side_rule": "model",
+    "max_spread": 9.0,
+    "min_score": -9.0,
+    "maker_level": "fair-2",
+    "rest": 2.0,
+    "then_taker": 1.0,
+    "exit": "settlement"
+   },
+   "train_c": 1.596938775510204,
+   "train_trades": 588.0,
+   "val_c": 0.5311004784688995,
+   "val_trades": 209.0,
+   "failed": [
+    "TRAIN t < 1.5"
+   ]
+  },
+  {
+   "key": {
+    "model": "ADAPT",
+    "delay": 1.0,
+    "min_edge": -9.0,
+    "side_rule": "model",
+    "max_spread": 9.0,
+    "min_score": -9.0,
+    "maker_level": "fair-5",
+    "rest": 3.0,
+    "then_taker": 0.0,
+    "exit": "settlement"
+   },
+   "train_c": 1.456674473067916,
+   "train_trades": 427.0,
+   "val_c": 2.0392156862745097,
+   "val_trades": 153.0,
+   "failed": [
+    "TRAIN t < 1.5"
+   ]
+  },
+  {
+   "key": {
+    "model": "ADAPT",
+    "delay": 1.0,
+    "min_edge": -9.0,
+    "side_rule": "model",
+    "max_spread": 9.0,
+    "min_score": -9.0,
+    "maker_level": "fair-5",
+    "rest": 3.0,
+    "then_taker": 1.0,
+    "exit": "settlement"
+   },
+   "train_c": 1.456674473067916,
+   "train_trades": 427.0,
+   "val_c": 2.0392156862745097,
+   "val_trades": 153.0,
+   "failed": [
+    "TRAIN t < 1.5"
+   ]
+  },
+  {
+   "key": {
+    "model": "B50",
+    "delay": 0.5,
+    "min_edge": -9.0,
+    "side_rule": "model",
+    "max_spread": 9.0,
+    "min_score": -9.0,
+    "maker_level": "fair-5",
+    "rest": 0.5,
+    "then_taker": 1.0,
+    "exit": "settlement"
+   },
+   "train_c": 0.16983311258278153,
+   "train_trades": 151.0,
+   "val_c": 4.149472413793102,
+   "val_trades": 29.0,
+   "failed": [
+    "TRAIN t < 1.5",
+    "best market carries it"
+   ]
+  },
+  {
+   "key": {
+    "model": "B50",
+    "delay": 1.0,
+    "min_edge": -9.0,
+    "side_rule": "model",
+    "max_spread": 9.0,
+    "min_score": -9.0,
+    "maker_level": "fair-10",
+    "rest": 1.0,
+    "then_taker": 0.0,
+    "exit": "settlement"
+   },
+   "train_c": 0.17105263157894737,
+   "train_trades": 76.0,
+   "val_c": 1.1153846153846154,
+   "val_trades": 26.0,
+   "failed": [
+    "TRAIN t < 1.5",
+    "best market carries it"
+   ]
+  },
+  {
+   "key": {
+    "model": "B50",
+    "delay": 1.0,
+    "min_edge": -9.0,
+    "side_rule": "model",
+    "max_spread": 9.0,
+    "min_score": -9.0,
+    "maker_level": "fair-10",
+    "rest": 1.0,
+    "then_taker": 1.0,
+    "exit": "settlement"
+   },
+   "train_c": 0.17105263157894737,
+   "train_trades": 76.0,
+   "val_c": 1.1153846153846154,
+   "val_trades": 26.0,
+   "failed": [
+    "TRAIN t < 1.5",
+    "best market carries it"
+   ]
+  },
+  {
+   "key": {
+    "model": "D_twap",
+    "delay": 0.0,
+    "min_edge": 0.0,
+    "side_rule": "ev",
+    "max_spread": 0.02,
+    "min_score": -9.0,
+    "maker_level": "",
+    "rest": 1.0,
+    "then_taker": 0.0,
+    "exit": "settlement"
+   },
+   "train_c": 4.149321511166647,
+   "train_trades": 38.0,
+   "val_c": 41.16872,
+   "val_trades": 5.0,
+   "failed": [
+    "TRAIN t < 1.5",
+    "VALIDATION < 10 trades"
+   ]
+  },
+  {
+   "key": {
+    "model": "D_twap",
+    "delay": 0.0,
+    "min_edge": 0.0,
+    "side_rule": "ev",
+    "max_spread": 0.02,
+    "min_score": 2.0,
+    "maker_level": "",
+    "rest": 1.0,
+    "then_taker": 0.0,
+    "exit": "settlement"
+   },
+   "train_c": 4.149321511166647,
+   "train_trades": 38.0,
+   "val_c": 41.16872,
+   "val_trades": 5.0,
+   "failed": [
+    "TRAIN t < 1.5",
+    "VALIDATION < 10 trades"
+   ]
+  },
+  {
+   "key": {
+    "model": "D_twap",
+    "delay": 0.0,
+    "min_edge": 0.0,
+    "side_rule": "ev",
+    "max_spread": 0.03,
+    "min_score": -9.0,
+    "maker_level": "",
+    "rest": 1.0,
+    "then_taker": 0.0,
+    "exit": "settlement"
+   },
+   "train_c": 4.440464700579347,
+   "train_trades": 42.0,
+   "val_c": 41.16872,
+   "val_trades": 5.0,
+   "failed": [
+    "TRAIN t < 1.5",
+    "VALIDATION < 10 trades"
+   ]
+  },
+  {
+   "key": {
+    "model": "D_twap",
+    "delay": 0.0,
+    "min_edge": 0.0,
+    "side_rule": "ev",
+    "max_spread": 0.03,
+    "min_score": 2.0,
+    "maker_level": "",
+    "rest": 1.0,
+    "then_taker": 0.0,
+    "exit": "settlement"
+   },
+   "train_c": 4.440464700579347,
+   "train_trades": 42.0,
+   "val_c": 41.16872,
+   "val_trades": 5.0,
+   "failed": [
+    "TRAIN t < 1.5",
+    "VALIDATION < 10 trades"
+   ]
+  },
+  {
+   "key": {
+    "model": "D_twap",
+    "delay": 0.0,
+    "min_edge": 0.0,
+    "side_rule": "ev",
+    "max_spread": 0.05,
+    "min_score": -9.0,
+    "maker_level": "",
+    "rest": 1.0,
+    "then_taker": 0.0,
+    "exit": "settlement"
+   },
+   "train_c": 3.692453811073104,
+   "train_trades": 46.0,
+   "val_c": 41.16872,
+   "val_trades": 5.0,
+   "failed": [
+    "TRAIN t < 1.5",
+    "one asset > 60 % of |P&L|",
+    "VALIDATION < 10 trades"
+   ]
+  },
+  {
+   "key": {
+    "model": "D_twap",
+    "delay": 0.0,
+    "min_edge": 0.0,
+    "side_rule": "ev",
+    "max_spread": 0.05,
+    "min_score": 2.0,
+    "maker_level": "",
+    "rest": 1.0,
+    "then_taker": 0.0,
+    "exit": "settlement"
+   },
+   "train_c": 3.692453811073104,
+   "train_trades": 46.0,
+   "val_c": 41.16872,
+   "val_trades": 5.0,
+   "failed": [
+    "TRAIN t < 1.5",
+    "one asset > 60 % of |P&L|",
+    "VALIDATION < 10 trades"
+   ]
+  },
+  {
+   "key": {
+    "model": "D_twap",
+    "delay": 0.0,
+    "min_edge": 0.0,
+    "side_rule": "ev",
+    "max_spread": 9.0,
+    "min_score": -9.0,
+    "maker_level": "",
+    "rest": 1.0,
+    "then_taker": 0.0,
+    "exit": "settlement"
+   },
+   "train_c": 0.4537389714535654,
+   "train_trades": 49.0,
+   "val_c": 41.16872,
+   "val_trades": 5.0,
+   "failed": [
+    "TRAIN t < 1.5",
+    "best market carries it",
+    "VALIDATION < 10 trades"
+   ]
+  },
+  {
+   "key": {
+    "model": "D_twap",
+    "delay": 0.0,
+    "min_edge": 0.0,
+    "side_rule": "ev",
+    "max_spread": 9.0,
+    "min_score": 2.0,
+    "maker_level": "",
+    "rest": 1.0,
+    "then_taker": 0.0,
+    "exit": "settlement"
+   },
+   "train_c": 3.692453811073104,
+   "train_trades": 46.0,
+   "val_c": 41.16872,
+   "val_trades": 5.0,
+   "failed": [
+    "TRAIN t < 1.5",
+    "one asset > 60 % of |P&L|",
+    "VALIDATION < 10 trades"
+   ]
+  },
+  {
+   "key": {
+    "model": "D_twap",
+    "delay": 0.0,
+    "min_edge": 0.0,
+    "side_rule": "model",
+    "max_spread": 0.02,
+    "min_score": -9.0,
+    "maker_level": "",
+    "rest": 1.0,
+    "then_taker": 0.0,
+    "exit": "settlement"
+   },
+   "train_c": 4.149321511166647,
+   "train_trades": 38.0,
+   "val_c": 41.16872,
+   "val_trades": 5.0,
+   "failed": [
+    "TRAIN t < 1.5",
+    "VALIDATION < 10 trades"
+   ]
+  },
+  {
+   "key": {
+    "model": "D_twap",
+    "delay": 0.0,
+    "min_edge": 0.0,
+    "side_rule": "model",
+    "max_spread": 0.02,
+    "min_score": 2.0,
+    "maker_level": "",
+    "rest": 1.0,
+    "then_taker": 0.0,
+    "exit": "settlement"
+   },
+   "train_c": 4.149321511166647,
+   "train_trades": 38.0,
+   "val_c": 41.16872,
+   "val_trades": 5.0,
+   "failed": [
+    "TRAIN t < 1.5",
+    "VALIDATION < 10 trades"
+   ]
+  },
+  {
+   "key": {
+    "model": "D_twap",
+    "delay": 0.0,
+    "min_edge": 0.0,
+    "side_rule": "model",
+    "max_spread": 0.03,
+    "min_score": -9.0,
+    "maker_level": "",
+    "rest": 1.0,
+    "then_taker": 0.0,
+    "exit": "settlement"
+   },
+   "train_c": 4.440464700579347,
+   "train_trades": 42.0,
+   "val_c": 41.16872,
+   "val_trades": 5.0,
+   "failed": [
+    "TRAIN t < 1.5",
+    "VALIDATION < 10 trades"
+   ]
+  },
+  {
+   "key": {
+    "model": "D_twap",
+    "delay": 0.0,
+    "min_edge": 0.0,
+    "side_rule": "model",
+    "max_spread": 0.03,
+    "min_score": 2.0,
+    "maker_level": "",
+    "rest": 1.0,
+    "then_taker": 0.0,
+    "exit": "settlement"
+   },
+   "train_c": 4.440464700579347,
+   "train_trades": 42.0,
+   "val_c": 41.16872,
+   "val_trades": 5.0,
+   "failed": [
+    "TRAIN t < 1.5",
+    "VALIDATION < 10 trades"
+   ]
+  },
+  {
+   "key": {
+    "model": "D_twap",
+    "delay": 0.0,
+    "min_edge": 0.0,
+    "side_rule": "model",
+    "max_spread": 0.05,
+    "min_score": -9.0,
+    "maker_level": "",
+    "rest": 1.0,
+    "then_taker": 0.0,
+    "exit": "settlement"
+   },
+   "train_c": 3.692453811073104,
+   "train_trades": 46.0,
+   "val_c": 41.16872,
+   "val_trades": 5.0,
+   "failed": [
+    "TRAIN t < 1.5",
+    "one asset > 60 % of |P&L|",
+    "VALIDATION < 10 trades"
+   ]
+  },
+  {
+   "key": {
+    "model": "D_twap",
+    "delay": 0.0,
+    "min_edge": 0.0,
+    "side_rule": "model",
+    "max_spread": 0.05,
+    "min_score": 2.0,
+    "maker_level": "",
+    "rest": 1.0,
+    "then_taker": 0.0,
+    "exit": "settlement"
+   },
+   "train_c": 3.692453811073104,
+   "train_trades": 46.0,
+   "val_c": 41.16872,
+   "val_trades": 5.0,
+   "failed": [
+    "TRAIN t < 1.5",
+    "one asset > 60 % of |P&L|",
+    "VALIDATION < 10 trades"
+   ]
+  }
+ ]
+}

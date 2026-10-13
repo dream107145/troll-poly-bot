@@ -107,7 +107,9 @@ class RoundTrip:
 
     @property
     def status(self) -> str:
-        if self.pnl is None and self.sold_ts is None:
+        # a window's P&L is reported once, on its last trip; the others are closed by the same
+        # settlement and must not read "open" forever (both-sides windows did, 2026-10-01)
+        if self.pnl is None and self.sold_ts is None and self.settled_ts is None:
             return "open"
         if self.exited or (self.sold_ts is not None and self.pnl is not None):
             return "sold"
@@ -193,7 +195,12 @@ def round_trips(rows: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
                 t.exited = t.exited or bool(row.get("exited"))
             if trips:
                 last = trips[-1]
-                last.pnl = _num(row.get("pnl"))
+                if row.get("resolved_late"):
+                    # a correction: the window's real outcome replacing an earlier mark; its pnl is
+                    # the difference, so the trip's P&L becomes mark + correction = the real result
+                    last.pnl = (last.pnl or 0.0) + _num(row.get("pnl"))
+                else:
+                    last.pnl = _num(row.get("pnl"))
                 last.balance_after = _num(row.get("balance")) or None
             for key in [k for k in open_trip if k[0] == slug]:
                 close(key)
