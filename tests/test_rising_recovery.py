@@ -1449,3 +1449,19 @@ def test_opt_momentum_phase_buys_the_lower_token_every_three_seconds_until_it_en
             if o_.size == 5.0 and s_ == "DOWN":
                 sent.append((18.0 + i * 0.5, s_, o_.size))
     assert len(sent) == n                                             # outside the phase the fixed buys stop
+
+
+def test_opt_strict_mode_never_pairs_the_rising_token_with_the_dear_one():
+    # the user 10-13: "when it buys the rising token around 0.4, do not make a pair with the high-priced token;
+    # buy the other token only if both settlement PnLs can be positive"
+    w = _O(opt_require_positive="both")
+    b = w.e._book(w.m)                                                # noqa: SLF001
+    b.fired.add("init")
+    b.add("UP", 10.0, 0.40, 0.17)                                     # the momentum buys: 10 UP for 4.17
+    out = _btc_ramp(w, 5.0, [100000.0] * 28, up=(0.39, 0.40), dn=(0.66, 0.67))   # 5 .. 11.75 s: the 6-s timer runs
+    assert out == [] and b.D == 0.0                                   # DOWN at 0.67 would leave PnL_Down < 0: no pair
+    out = _btc_ramp(w, 12.0, [100000.0] * 28, up=(0.39, 0.40), dn=(0.29, 0.30))  # both tokens cheap: both outcomes > 0
+    (_, side, o), = out
+    assert side == "DOWN"
+    w.fill(o, 19.0, price=0.30)
+    assert b.U - b.C > 0 and b.D - b.C > 0

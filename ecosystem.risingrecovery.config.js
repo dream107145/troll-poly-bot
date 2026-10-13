@@ -59,7 +59,7 @@ module.exports = {
         TPB_RTR_OPT_QUANTITIES: '5,10,15,20',
         TPB_RTR_OPT_MIN_IMPROVEMENT: '0.05',
         TPB_RTR_OPT_TIE_EPS: '0.01',
-        TPB_RTR_OPT_REQUIRE_POSITIVE: 'none',   // 'both' = the strict version (nearly every buy infeasible at ask prices)
+        TPB_RTR_OPT_REQUIRE_POSITIVE: 'both',   // the user 10-13: no pairs of the high-priced token; buy the other token only if BOTH settlement PnLs end > 0
         // 16:0x the user chose option 2: the same rules at half the size, the loss limits (daily 20, drawdown 60) kept
         TPB_RTR_SPOT_INIT_SHARES: '10',
         TPB_RTR_SPOT_REV_SHARES: '5',         // 50 % of 5 is under the venue's 5-share minimum: the minimum
