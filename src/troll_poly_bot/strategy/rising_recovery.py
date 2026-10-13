@@ -364,6 +364,9 @@ class MarketBook:
         self.opt_dir = 0
         self.opt_rise_armed: dict[str, bool] = {"UP": True, "DOWN": True}
         self.opt_n = 0
+        self.opt_init_filled = 0.0
+        self.opt_init_tries = 0
+        self._tops = None                    # the latest books (for the liquidation / outcome reports)
         self.guard_n = 0
         self.climb_peak: float | None = None # the climbed token's highest mid since its last climb fill
         self.climb_dipped = False            # ... and whether it has fallen spot_climb_reset_drop from there
@@ -1558,6 +1561,42 @@ class RisingRecoveryEngine(BookMomentumEngine):
                 break
         return val
 
+    def _opt_liquidation(self, b, tops) -> dict:
+        """What selling everything now would realise: each side walked down the executable bid depth (the levels
+        below the best bid, as far as the book shows), the venue's taker fee at each level; unsold shares count 0."""
+        out = {"proceeds": 0.0, "unsold_up": 0.0, "unsold_down": 0.0}
+        meta = self.meta_by_slug.get(b.slug)
+        for side, held in (("UP", b.U), ("DOWN", b.D)):
+            tok, ob = tops[side]
+            left = held
+            for lv in sorted(getattr(ob, "bids", None) or [], key=lambda l: -l.price) if ob is not None else []:
+                if left <= 1e-9:
+                    break
+                take = min(left, float(lv.size))
+                fee = meta.fee.taker_fee_per_share(lv.price) if meta is not None and getattr(meta, "fee", None) else taker_fee(lv.price)
+                out["proceeds"] += take * (lv.price - fee)
+                left -= take
+            out["unsold_" + side.lower()] = round(left, 2)
+        out["liquidation_pnl"] = round(out["proceeds"] - b.C, 4)
+        out["proceeds"] = round(out["proceeds"], 4)
+        return out
+
+    def _opt_outcomes(self, b, tops) -> dict:
+        """Both-outcome profitability vs the predicted winner's (the higher-mid token): reported apart, never
+        as a guarantee."""
+        mids = {}
+        for s_ in ("UP", "DOWN"):
+            tok, ob = tops[s_]
+            mids[s_] = ((ob.best_bid + ob.best_ask) / 2.0 if ob is not None and ob.best_bid is not None and ob.best_ask is not None
+                        else self._mid(tok))
+        pu, pd = b.U - b.C, b.D - b.C
+        pred = None
+        if mids["UP"] is not None and mids["DOWN"] is not None and mids["UP"] != mids["DOWN"]:
+            pred = "UP" if mids["UP"] > mids["DOWN"] else "DOWN"
+        return {"both_positive": bool(pu > 0 and pd > 0), "predicted_winner": pred,
+                "predicted_winner_pnl": (round(pu if pred == "UP" else pd, 4) if pred else None),
+                "predicted_winner_positive": (bool((pu if pred == "UP" else pd) > 0) if pred else None)}
+
     def _opt_log(self, b, event, decision, now, **extra) -> None:
         d = b.last_spot or {}
         rec = {"ts": now, "market": b.slug, "event": event, "decision": decision, "btc": d.get("spot"),
@@ -1565,6 +1604,10 @@ class RisingRecoveryEngine(BookMomentumEngine):
                "avg_up": (round(b.CU / b.U, 4) if b.U > 0 else None), "avg_down": (round(b.CD / b.D, 4) if b.D > 0 else None),
                "pnl_up": round(b.U - b.C, 4), "pnl_down": round(b.D - b.C, 4),
                "worst": round(min(b.U, b.D) - b.C, 4), "best": round(max(b.U, b.D) - b.C, 4)}
+        tops = getattr(b, "_tops", None)
+        if tops:
+            rec.update(self._opt_outcomes(b, tops))
+            rec["liquidation"] = self._opt_liquidation(b, tops)
         rec.update(extra)
         self.rr_stats[f"opt_{decision}"] += 1
         log.info("[RTR_OPT] %s", json.dumps(rec))
@@ -1607,6 +1650,7 @@ class RisingRecoveryEngine(BookMomentumEngine):
         if d is None or d.get("spot") is None:
             return None
         b.last_spot = d
+        b._tops = tops
         opened_s = (now - m.open_ts) / 1000.0
         mids = {s_: self._mid(tops[s_][0]) for s_ in ("UP", "DOWN")}
         blocked = None
@@ -1870,6 +1914,12 @@ class RisingRecoveryEngine(BookMomentumEngine):
         o = self.resting.pop(order_id, None)
         if o is not None and not filled and not o.get("no_guard"):
             self.end_guard[o["token"]] = self._now + self.scfg.end_guard_s * 1000.0
+        if o is not None and not filled and o.get("kind") == "opt_init":
+            b = self.books.get(o["slug"])
+            if b is not None and b.opt_init_filled <= 1e-9:
+                b.fired.discard("init")                   # nothing bought: the initial entry may be proposed again
+                b.opt_init_tries += 1
+                self.rr_stats["opt_init_retry"] += 1
 
     # ------------------------------------------------------------------ fills (rule 4)
 
@@ -1897,6 +1947,8 @@ class RisingRecoveryEngine(BookMomentumEngine):
         if kind in ("entry", "buy_take", "fix", "fix_take", "hedge", "hedge_take", "cover_bid", "cover_take") or kind.startswith(("spot_", "opt_")):
             b.cycle_fills += 1
             b.cycle_cost += q * px + fee
+        if kind == "opt_init":
+            b.opt_init_filled += q
         if kind.startswith("opt_"):
             exp = getattr(fill, "expected_price", None) or getattr(order, "expected_price", None)
             self._opt_log(b, sent.get("trigger", kind), "fill", now, side=side, fill_qty=q, fill_price=px, fee=round(fee, 5),
@@ -1981,6 +2033,8 @@ class RisingRecoveryEngine(BookMomentumEngine):
             "config": self.scfg.as_dict(), "stats": dict(self.rr_stats), "open_cost_usdc": round(self.open_cost(), 4),
             "resting": {k: dict(v) for k, v in self.resting.items()},
             "markets": {s: {"phase": b.phase, "high": b.high, "U": round(b.U, 2), "D": round(b.D, 2), "C": round(b.C, 4),
+                            **(self._opt_outcomes(b, b._tops) if getattr(b, "_tops", None) else {}),
+                            **({"liquidation": self._opt_liquidation(b, b._tops)} if getattr(b, "_tops", None) else {}),
                             "mtm": (round(b.U * self._mid(b.tokens["UP"]) + b.D * self._mid(b.tokens["DOWN"]) - b.C, 4)
                                     if b.tokens and self._mid(b.tokens.get("UP", "")) is not None and self._mid(b.tokens.get("DOWN", "")) is not None else None),
                             "if_up": round(b.U - b.C, 4), "if_down": round(b.D - b.C, 4), "worst": round(b.worst, 4),

@@ -28,7 +28,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from troll_poly_bot.features.engine import FeatureEngine            # noqa: E402
-from troll_poly_bot.feeds.markets import Market                     # noqa: E402
+from troll_poly_bot.feeds.markets import Market, MarketMeta         # noqa: E402
+from troll_poly_bot.signals.costs import FeeSchedule                # noqa: E402
 from troll_poly_bot.risk.limits import RiskConfig, RiskManager      # noqa: E402
 from troll_poly_bot.strategy.engine import EngineConfig             # noqa: E402
 from troll_poly_bot.strategy.rising_recovery import RisingRecoveryConfig, RisingRecoveryEngine   # noqa: E402
@@ -50,7 +51,8 @@ def _ob(token, bid, ask, adep):
 
 
 def engine_for(overrides: dict) -> RisingRecoveryEngine:
-    sc = RisingRecoveryConfig(enabled=True, mode="momentum", max_daily_loss_usdc=1e9)
+    sc = RisingRecoveryConfig(enabled=True, mode=overrides.pop("mode", "momentum") if isinstance(overrides, dict) else "momentum",
+                              max_daily_loss_usdc=1e9)
     for k, v in overrides.items():
         cur = getattr(sc, k)
         setattr(sc, k, type(cur)(v) if not isinstance(cur, bool) else str(v).lower() in ("1", "true", "yes"))
@@ -66,6 +68,12 @@ def run_market(e: RisingRecoveryEngine, slug: str, b: dict, up: int) -> dict:
     m = Market(condition_id=slug, asset="BTC", yes_token_id=yes, no_token_id=no, strike=b.get("strike") or 0.0,
                open_ts=b["open"], close_ts=b["close"], slug=slug, min_size=5.0)
     T, ua, ub, da, db, uad, dad = b["t"], b["ua"], b["ub"], b["da"], b["db"], b["uad"], b["dad"]
+    spot = b.get("spot")
+    # the opt / spot modes read BTC spot, the strike and the book ages from evaluate(): fed here per pass, from the
+    # recorded point only (never a later one); the fee schedule is the venue's crypto schedule (rate 0.07 unless the
+    # chart carried another -- the cache does not keep it: an assumption, see the report)
+    e.meta_by_slug[slug] = MarketMeta(market=m, resolution_source="", accepting_orders=True, duration_s=300.0,
+                                      fee=FeeSchedule(rate=float(b.get("fee_rate") or 0.07)))
     pending: list[tuple[float, object, str]] = []        # (arrival, order, side)
     resting: dict[str, tuple[object, str]] = {}
     kinds: dict[str, int] = {}
@@ -76,7 +84,8 @@ def run_market(e: RisingRecoveryEngine, slug: str, b: dict, up: int) -> dict:
         e.on_pair_fill_record(slug, o, SimpleNamespace(size=q, price=px, fee=fe, token_id=o.token_id), now)
         k = e.orders.get(o.order_id, {}).get("kind", "?")
         kinds[k] = kinds.get(k, 0) + 1
-        legs.append((k, "UP" if o.token_id == yes else "DOWN", px, q, fe, (b["close"] - now) / 1000.0))
+        legs.append((k, "UP" if o.token_id == yes else "DOWN", px, q, fe, (b["close"] - now) / 1000.0,
+                     float(getattr(o, "expected_price", None) or px)))
     for i in range(len(T)):
         now = float(T[i])
         if now < b["open"] or now >= b["close"]:
@@ -120,6 +129,11 @@ def run_market(e: RisingRecoveryEngine, slug: str, b: dict, up: int) -> dict:
                 pending = [x for x in pending if x[1].order_id != oid]
                 e.on_pair_done(oid, filled=False)
         books = {slug: (_ob(yes, ub[i], ua[i], uad[i]), _ob(no, db[i], da[i], dad[i]))}
+        if e.scfg.mode in ("spot", "opt") and spot is not None and spot[i] == spot[i]:
+            for tok, ob in ((yes, books[slug][0]), (no, books[slug][1])):
+                e._record(tok, now, ob.best_bid, ob.best_ask)             # noqa: SLF001  (evaluate() does this live)
+            e._capture_spot(m, SimpleNamespace(price=float(spot[i]), age_ms=0.0), 0.0, 0.0,   # noqa: SLF001
+                            {yes: 0.0, no: 0.0}, now)
         for _, side, o in e.pair_requests(now, {slug: m}, books, balance=1e6) or ():
             e.on_pair_submit(o.order_id, slug, side, o.price, o.size)
             pending.append((now + LAT_MS, o, side))
@@ -129,12 +143,18 @@ def run_market(e: RisingRecoveryEngine, slug: str, b: dict, up: int) -> dict:
         e.on_pair_done(oid, filled=False)
     mb = e.books.get(slug)
     pnl = 0.0 if mb is None else ((mb.U if up == 1 else mb.D) - mb.C)
+    fees = sum(l[4] for l in legs)
+    slip = sum((l[2] - (l[6] if len(l) > 6 else l[2])) * l[3] for l in legs if len(l) > 6)
+    worst = (min(mb.U, mb.D) - mb.C) if mb else 0.0
+    best_ = (max(mb.U, mb.D) - mb.C) if mb else 0.0
     if mb is not None:
         e.on_market_settled(slug, up == 1, pnl, b["close"] + 1.0)
     e._cleanup(b["close"] + 700_000.0)                                 # noqa: SLF001
     return {"slug": slug, "open": b["open"], "pnl": pnl, "cost": mb.C if mb else 0.0, "U": mb.U if mb else 0.0,
             "D": mb.D if mb else 0.0, "fills": kinds, "placed": placed, "done": mb.why_done if mb else "",
-            "legs": [(k, s, px, q, fe, left, float((up == 1) == (s == "UP"))) for k, s, px, q, fe, left in legs]}
+            "fees": fees, "trades": len(legs), "worst": worst, "best": best_, "both_positive": bool(mb and worst > 0),
+            "legs": [(k, s, px, q, fe, left, float((up == 1) == (s == "UP"))) for k, s, px, q, fe, left, *_ in legs],
+            "slippage": slip}
 
 
 def _init(books_path, up_path):
@@ -156,7 +176,15 @@ def summarise(rows: list[dict], cuts) -> dict:
         rs = [r for r in rows if sel(r)]
         traded = [r for r in rs if r["cost"] > 0]
         p = [r["pnl"] for r in rs]
+        eq, peak, mdd = 0.0, 0.0, 0.0
+        for r in sorted(rs, key=lambda r: r["open"]):
+            eq += r["pnl"]; peak = max(peak, eq); mdd = max(mdd, peak - eq)
         out[name] = {"markets": len(rs), "traded": len(traded), "pnl": round(sum(p), 2),
+                     "fees": round(sum(r.get("fees", 0.0) for r in rs), 2), "slippage": round(sum(r.get("slippage", 0.0) for r in rs), 2),
+                     "trades": sum(r.get("trades", 0) for r in rs), "max_drawdown": round(mdd, 2),
+                     "worst_case_mean": round(st.mean([r.get("worst", 0.0) for r in traded]), 4) if traded else None,
+                     "best_case_mean": round(st.mean([r.get("best", 0.0) for r in traded]), 4) if traded else None,
+                     "both_positive_rate": round(sum(r.get("both_positive", False) for r in traded) / len(traded), 4) if traded else None,
                      "per_market": round(st.mean(p), 4) if p else None,
                      "se": round(st.pstdev(p) / math.sqrt(len(p)), 4) if len(p) > 1 else None,
                      "t": round(st.mean(p) / (st.pstdev(p) / math.sqrt(len(p))), 2) if len(p) > 1 and st.pstdev(p) > 0 else None,
@@ -188,6 +216,7 @@ def main():
     with ctx.Pool(n) as pool:
         for spec in sets:
             name, kv = spec[0], dict(x.split("=", 1) for x in spec[1:])
+            kv = dict(kv)
             t0 = time.time()
             rows = [r for part in pool.map(_chunk, [(kv, c) for c in chunks]) for r in part]
             s = summarise(rows, cuts)

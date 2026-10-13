@@ -1331,3 +1331,57 @@ def test_opt_at_most_one_order_per_decision_event():
         for _, s_, o_ in out:
             w.fill(o_, 9.0 + i * 0.5 + 0.1)
     assert max(per_pass) == 1 and sum(per_pass) >= 1                  # never two orders in one pass
+
+
+def test_opt_initial_entry_is_proposed_again_when_its_order_filled_nothing():
+    # 14:30: the initial order was killed at the thin open (quote_pulled) and the market never got an initial entry
+    w = _O()
+    (_, _, o), = _btc_ramp(w, 0.25, [100000.0] * 8 + [100002.0, 100004.0, 100006.0, 100008.0])
+    w.e.on_pair_done(o.order_id, filled=False)                        # killed, nothing bought
+    assert "init" not in w.book.fired and w.e.rr_stats["opt_init_retry"] == 1
+    out = _btc_ramp(w, 6.5, [100010.0, 100012.0, 100014.0, 100016.0])   # the signal still holds: proposed again
+    (_, side, o2), = out
+    assert side == "UP" and o2.size == pytest.approx(10.0)
+    w.fill(o2, 7.6)
+    assert "init" in w.book.fired and w.book.opt_init_filled == pytest.approx(10.0)
+    w.e.on_pair_done(o2.order_id, filled=True)
+    assert [s for _, s, _ in _btc_ramp(w, 8.0, [100018.0] * 4) if s == "UP" and False] == []   # no third initial entry
+
+
+def test_opt_effective_price_includes_fee_and_slippage_and_walks_depth():
+    w = _O()
+    w.meta.fee = FeeSchedule(rate=0.04)                               # the market's own schedule, not a hard-coded rate
+    b = w.e._book(w.m)                                                # noqa: SLF001
+    ob = OrderBook("UP", bids=[BookLevel(0.54, 100.0)], asks=[BookLevel(0.55, 6.0), BookLevel(0.56, 20.0), BookLevel(0.60, 100.0)])
+    tops = {"UP": ("UP", ob), "DOWN": ("DN", _ob("DN", 0.44, 0.45))}
+    filled, vwap, eff, why = w.e._opt_simulate(b, w.m, tops, "UP", 10.0)   # noqa: SLF001
+    assert why is None and filled == pytest.approx(10.0)
+    assert vwap == pytest.approx((6 * 0.55 + 4 * 0.56) / 10)         # walked two levels
+    assert eff == pytest.approx(vwap + 0.04 * vwap * (1 - vwap) + 0.01)   # + the market fee + the slippage allowance
+    filled, vwap, eff, why = w.e._opt_simulate(b, w.m, tops, "UP", 40.0)   # noqa: SLF001
+    assert why is None and filled == pytest.approx(26.0)              # a partial fill: only the depth within ask + 1c
+
+
+def test_opt_no_initial_entry_before_two_seconds_of_data_after_the_open():
+    w = _O()
+    out = _btc_ramp(w, 0.25, [100000.0, 100000.0, 100002.0, 100004.0, 100006.0, 100008.0, 100010.0])   # 0.25 .. 1.75 s
+    assert out == [] and "init" not in w.book.fired                   # a strong move, but no 2 s after the open yet
+    out = _btc_ramp(w, 2.0, [100012.0, 100014.0])
+    assert [s for _, s, _ in out] == ["UP"]                           # at 2.0 s: BTC +1.2 bp over the 2 s since the open
+
+
+def test_opt_pnl_accounting_liquidation_and_outcome_reports():
+    w = _O()
+    b = w.e._book(w.m)                                                # noqa: SLF001
+    b.add("UP", 10.0, 0.60, 0.20)                                     # 10 UP for 6.20 incl. a 0.20 fee
+    b.add("DOWN", 5.0, 0.30, 0.05)                                    # 5 DOWN for 1.55
+    assert b.U - b.C == pytest.approx(10 - 7.75) and b.D - b.C == pytest.approx(5 - 7.75)
+    assert b.CU / b.U == pytest.approx(0.62) and b.CD / b.D == pytest.approx(0.31)   # average acquisition prices
+    tops = {"UP": ("UP", OrderBook("UP", bids=[BookLevel(0.70, 6.0), BookLevel(0.69, 100.0)], asks=[BookLevel(0.71, 100.0)])),
+            "DOWN": ("DN", OrderBook("DN", bids=[BookLevel(0.29, 100.0)], asks=[BookLevel(0.31, 100.0)]))}
+    liq = w.e._opt_liquidation(b, tops)                               # noqa: SLF001
+    f = FeeSchedule().taker_fee_per_share
+    expected = 6 * (0.70 - f(0.70)) + 4 * (0.69 - f(0.69)) + 5 * (0.29 - f(0.29)) - 7.75
+    assert liq["liquidation_pnl"] == pytest.approx(expected, abs=1e-3) and liq["unsold_up"] == 0
+    rep = w.e._opt_outcomes(b, tops)                                  # noqa: SLF001
+    assert rep["predicted_winner"] == "UP" and rep["predicted_winner_positive"] is True and rep["both_positive"] is False

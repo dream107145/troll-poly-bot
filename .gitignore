@@ -21,6 +21,7 @@ data/charts_index.json
 
 # high-resolution tick recordings (scripts/record_ticks.py): large, research only
 data/ticks/
+data/
 
 # spot-shock replay feature cache (backtest/spot_shock_replay.py), rebuilt from data/charts
 data/replay/spot_shock_cache/
