@@ -1520,3 +1520,31 @@ def test_opt_opposite_token_waits_5_s_after_the_first_buy_and_is_capped_at_half_
     assert b.U - b.C > 0 and b.D - b.C > 0
     out = sum(flat(17.0, 14), [])                                     # DOWN already at 1/2 of UP: nothing more
     assert [s_ for _, s_, _ in out] == []
+
+
+def test_nothing_is_placed_while_risk_is_halted(monkeypatch, tmp_path):
+    # paper 10-13 16:16: the daily-loss halt (-23.55) stopped the signal path only; the engine's opt orders kept buying
+    # for 17 more minutes (33 fills, realised_today -57.38)
+    w = _O()
+    w.e.risk_halted = True
+    out = _btc_ramp(w, 0.25, [100000.0] * 8 + [100002.0, 100004.0, 100006.0, 100008.0])
+    assert out == [] and w.e.rr_stats["risk_halted_passes"] >= 1      # a clear initial-entry signal, nothing placed
+    w.e.risk_halted = False
+    out = _btc_ramp(w, 4.0, [100010.0, 100012.0, 100014.0, 100016.0])
+    assert [s for _, s, _ in out] == ["UP"]                           # the halt lifted: the entry goes out
+    monkeypatch.setenv("TPB_RTR_ENABLED", "1")
+    from troll_poly_bot.config import BotConfig
+    from troll_poly_bot.live import LiveBot
+    cfg = BotConfig()
+    cfg.engine.strategy = "rising_recovery"
+    cfg.deploy_mode, cfg.execution_scenario = "paper", "calibrated"
+    cfg.rising_recovery = RisingRecoveryConfig.from_env()
+    bot = LiveBot(assets=("BTC",), balance=200.0, cfg=cfg, state_path=str(tmp_path / "live_state.rr.json"),
+                  trade_log=str(tmp_path / "live_trades.rr.jsonl"), earnings_path=str(tmp_path / "e.jsonl"),
+                  kill_file=str(tmp_path / "KILL"))
+    bot.risk.realised_today = -(bot.risk.cfg.max_daily_loss_usdc + 1.0)
+    bot._engine_pair_cancels(T0)                                      # noqa: SLF001
+    assert bot.engine.risk_halted is True
+    bot.risk.realised_today = 0.0
+    bot._engine_pair_cancels(T0 + 1000)                               # noqa: SLF001
+    assert bot.engine.risk_halted is False

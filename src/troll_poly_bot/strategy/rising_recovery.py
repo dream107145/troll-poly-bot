@@ -442,6 +442,7 @@ class RisingRecoveryEngine(BookMomentumEngine):
     #: set by live.py each pass: the guard pauses entries (a feed drop, its cooldown, ...) -> books are still recorded,
     #: nothing is placed (paper 10-09 19:23: a favourite fix went out 6 s after a book-feed drop and lost the market)
     guard_paused = False
+    risk_halted = False                       # set by live.py: the daily-loss / drawdown halt; nothing is placed while True
 
     def __init__(self, cfg: EngineConfig, scfg: RisingRecoveryConfig, risk: RiskManager,
                  features: FeatureEngine | None = None) -> None:
@@ -547,6 +548,9 @@ class RisingRecoveryEngine(BookMomentumEngine):
             b = self._book(m)
             if self.guard_paused:
                 self.rr_stats["guard_paused_passes"] += 1
+                continue
+            if self.risk_halted:
+                self.rr_stats["risk_halted_passes"] += 1
                 continue
             if b.phase == "done":
                 continue

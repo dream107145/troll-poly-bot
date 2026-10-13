@@ -3328,6 +3328,10 @@ class LiveBot:
             # an engine that opts in (rising_recovery) places nothing while the guard pauses entries -- its pair orders
             # used to bypass the guard: 10-09 19:23 a fix was bought 6 s after a book-feed drop, inside the cooldown
             self.engine.guard_paused = not self.guard.entries_allowed
+        if hasattr(self.engine, "risk_halted"):
+            # 10-13 16:16-16:33: the daily-loss halt (-23.55) stopped the signal path only; the engine's pair orders kept
+            # buying (33 fills, -33 more). An engine that opts in places nothing while risk is halted.
+            self.engine.risk_halted = not self.risk.halted().ok
         try:
             mkts = {slug: lm.meta.market for slug, lm in self.markets.items()}
             if getattr(self.engine, "wants_books", False):
