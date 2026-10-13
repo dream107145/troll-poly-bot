@@ -369,6 +369,9 @@ def main() -> None:
     ap.add_argument("--max-daily-loss", type=float, default=10.0,
                     help="live: halt for the rest of the run once realised losses reach this (default 10)")
     ap.add_argument("--max-orders-per-hour", type=int, default=60)
+    ap.add_argument("--risk-daily-loss", type=float, default=None,
+                    help="risk: halt entries once realised losses today reach this many USDC (default 10 per 100 of balance; "
+                         "--max-daily-loss is the real-money cap only). Pair it with TPB_CONTROLS_IGNORE=risk.max_daily_loss_usdc")
     ap.add_argument("--max-drawdown", type=float, default=None,
                     help="risk: halt entries once equity is this many USDC below its peak (default 30 per 100 of balance). "
                          "Pair it with TPB_CONTROLS_IGNORE=risk.max_drawdown_usdc or the Settings page overrides it")
@@ -389,6 +392,8 @@ def main() -> None:
     cfg.scale_risk_to_balance(args.balance)
     if args.max_drawdown is not None:
         cfg.risk.max_drawdown_usdc = args.max_drawdown
+    if args.risk_daily_loss is not None:
+        cfg.risk.max_daily_loss_usdc = args.risk_daily_loss
     resolve_mode(args)
     if args.scenario is not None:
         cfg.execution_scenario = args.scenario
@@ -444,6 +449,8 @@ def main() -> None:
         cfg.scale_risk_to_balance(venue.bankroll)
         if args.max_drawdown is not None:
             cfg.risk.max_drawdown_usdc = args.max_drawdown
+        if args.risk_daily_loss is not None:
+            cfg.risk.max_daily_loss_usdc = args.risk_daily_loss
         if args.min_edge is not None:
             cfg.engine.min_net_edge = args.min_edge
         if args.mode == "shadow":

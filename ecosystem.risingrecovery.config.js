@@ -192,7 +192,7 @@ module.exports = {
         TPB_RTR_MAX_TOTAL_COST_USDC: '200',
         TPB_RTR_ASSETS: 'BTC',
         TPB_RTR_MAX_TOTAL_EXPOSURE_USDC: '200',
-        TPB_RTR_MAX_DAILY_LOSS_USDC: '20',
+        TPB_RTR_MAX_DAILY_LOSS_USDC: '100',      // the user 10-13 16:37: daily loss 100
         TPB_RTR_MAX_ORDER_USDC: '100',
         TPB_RTR_MAX_SIMULTANEOUS_POSITIONS: '4',
         TPB_RTR_FAST_FEED: '0',
@@ -200,7 +200,7 @@ module.exports = {
         TPB_CONTROLS_IGNORE: 'risk.max_drawdown_usdc,risk.max_daily_loss_usdc',
       },
       args: '-m troll_poly_bot --balance 200 --mode paper --scenario calibrated --strategy rising_recovery --assets BTC '
-          + '--max-order-usdc 100 --max-open-usdc 200 --max-daily-loss 20 --max-drawdown 60 '
+          + '--max-order-usdc 100 --max-open-usdc 200 --max-daily-loss 100 --risk-daily-loss 100 --max-drawdown 60 '
           + '--data-tag risingrecovery-paper --keep-history --log-level INFO' },
   ],
 };
