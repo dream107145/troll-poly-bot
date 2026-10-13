@@ -87,7 +87,8 @@ UP or DOWN, again and again through the market -- and the inventory leans howeve
 OPT MODE (``mode`` = "opt", the user's consolidated spec 2026-10-13): one decision per pass at most, from these events --
 the 6-s timer, the 3-s momentum timer (the lower-priced token rising through 0.30-0.40, until it reverses 2c from its
 peak, reaches 0.50, leaves the zone or a limit stops it), a token's book rise signal, a confirmed flip of BTC's 2-s
-direction. Initial entry: once, at >= 2 s after the open (and <= opt_init_max_s), 10 shares in the direction of BTC's
+direction. Initial entry: once, at >= 2 s after the open (and <= opt_init_max_s; a sent order that fills nothing is re-sent
+until it fills, to the token rising in the book or the last BTC direction), 10 shares in the direction of BTC's
 2-s move when |move| > 0.3 bp, subject only to the price filter and the limits. Every other buy comes from the
 optimizer: for each side and each candidate quantity the fill is simulated against the ask depth (partial when
 short) with the market's fee and a slippage allowance; the effective price must be in 0.10..0.90; the resulting
@@ -253,6 +254,7 @@ class RisingRecoveryConfig(BookMomentumConfig):
     opt_init_bps: float = 0.3                # |BTC move over 2 s| > this -> the initial 10-share buy in that direction
     opt_init_shares: float = 10.0
     opt_init_max_s: float = 30.0             # no "initial" entry later than this after the open
+    opt_init_retry_max_s: float = 0.0        # a failed initial order is re-sent until filled; 0 = until the close guard, else this many s after the open
     opt_price_min: float = 0.10              # the safe effective-price range (fees + slippage in)
     opt_price_max: float = 0.90
     opt_eval_interval_s: float = 6.0         # the normal decision timer
@@ -1672,11 +1674,22 @@ class RisingRecoveryEngine(BookMomentumEngine):
         p_now, p_then = d["spot"], self._spot_price_at(m.asset, now - 2000.0)
         r2 = (p_now / p_then - 1.0) * 1e4 if p_then else None
         init_side = None
-        if "init" not in b.fired and r2 is not None and opened_s >= sc.opt_open_window_s and opened_s <= sc.opt_init_max_s:
-            if r2 > sc.opt_init_bps:
+        retry = b.opt_init_tries > 0                       # a sent initial order filled nothing: re-send until it fills
+        in_window = opened_s <= sc.opt_init_max_s or (retry and (sc.opt_init_retry_max_s <= 0 or opened_s <= sc.opt_init_retry_max_s))
+        if "init" not in b.fired and opened_s >= sc.opt_open_window_s and in_window and not blocked:
+            if r2 is not None and r2 > sc.opt_init_bps:
                 init_side = "UP"
-            elif r2 < -sc.opt_init_bps:
+            elif r2 is not None and r2 < -sc.opt_init_bps:
                 init_side = "DOWN"
+            elif retry:                                    # re-order: the token rising in the book, else the last BTC direction
+                rising_now = [s_ for s_ in ("UP", "DOWN") if (sg := self.signal(tops[s_][0], s_, now)) is not None and sg.confirmed
+                              and sg.rise >= sc.min_rise - 1e-9 and sg.age_ms <= sc.max_signal_age_ms]
+                if len(rising_now) == 1:
+                    init_side = rising_now[0]
+                elif b.opt_dir:
+                    init_side = "UP" if b.opt_dir > 0 else "DOWN"
+            if init_side and self._resting_on(tops[init_side][0]) is not None:
+                init_side = None                           # the previous order is still ending: propose again next pass
             if init_side:
                 events.append("init")
         if r2 is not None:
@@ -1730,14 +1743,15 @@ class RisingRecoveryEngine(BookMomentumEngine):
             return None
         # --- the initial entry: the fixed 10 shares, the price filter and the limits only
         if init_side:
-            b.fired.add("init")
             filled, vwap, eff, why = self._opt_simulate(b, m, tops, init_side, sc.opt_init_shares)
-            if why:
-                self._opt_log(b, tag, "skip", now, reason=f"initial {init_side}: {why}", r_2s_bps=round(r2, 3))
-            elif self._resting_on(tops[init_side][0]) is not None:
-                self._opt_log(b, tag, "skip", now, reason="an order on this token is still ending")
+            if why:                                        # not fired: proposed again once the filter / depth allows
+                if now - b.blocked_log_t >= 1000.0:
+                    b.blocked_log_t = now
+                    self._opt_log(b, tag, "skip", now, reason=f"initial {init_side}: {why}", r_2s_bps=(None if r2 is None else round(r2, 3)))
             else:
-                return self._opt_send(b, m, tops, init_side, filled, eff, tag, "opt_init", now, r_2s_bps=round(r2, 3))
+                b.fired.add("init")                        # fired only when an order actually goes out
+                return self._opt_send(b, m, tops, init_side, filled, eff, tag, "opt_init", now,
+                                      r_2s_bps=(None if r2 is None else round(r2, 3)), init_try=b.opt_init_tries + 1)
         # --- the optimizer: every side x quantity, plus no-trade
         w0, b0 = min(b.U, b.D) - b.C, max(b.U, b.D) - b.C
         best, notes = None, []

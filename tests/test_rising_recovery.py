@@ -1270,7 +1270,7 @@ def test_opt_initial_entry_follows_btc_two_second_move_over_0_3_bp_once():
 def test_opt_initial_entry_respects_the_safe_price_range_and_depth():
     w = _O()
     out = _btc_ramp(w, 0.25, [100000.0] * 8 + [100002.0, 100004.0, 100006.0, 100008.0], up=(0.91, 0.92))
-    assert out == [] and "init" in w.book.fired and w.e.rr_stats["opt_skip"] >= 1   # UP at 0.92: outside 0.10..0.90
+    assert out == [] and "init" not in w.book.fired and w.e.rr_stats["opt_skip"] >= 1   # UP at 0.92: outside 0.10..0.90, proposed again later
     w2 = _O()
     out = _btc_ramp(w2, 0.25, [100000.0] * 8 + [100002.0, 100004.0, 100006.0, 100008.0], depth=7.0)
     (_, side, o), = out
@@ -1385,3 +1385,38 @@ def test_opt_pnl_accounting_liquidation_and_outcome_reports():
     assert liq["liquidation_pnl"] == pytest.approx(expected, abs=1e-3) and liq["unsold_up"] == 0
     rep = w.e._opt_outcomes(b, tops)                                  # noqa: SLF001
     assert rep["predicted_winner"] == "UP" and rep["predicted_winner_positive"] is True and rep["both_positive"] is False
+
+
+def test_opt_initial_entry_skipped_while_its_order_is_ending_is_not_consumed():
+    # 15:15: the IOC was rejected (no_liquidity); 2 s later the re-proposal was skipped "still ending" and "init" stayed
+    # fired, so the market never got an entry
+    w = _O()
+    (_, _, o), = _btc_ramp(w, 0.25, [100000.0] * 8 + [100002.0, 100004.0, 100006.0, 100008.0])
+    w.e.on_pair_done(o.order_id, filled=False)                        # rejected at 3.0 s: the token is "ending" for end_guard_s
+    assert "init" not in w.book.fired
+    out = _btc_ramp(w, 3.5, [100010.0, 100012.0, 100014.0, 100016.0])   # 3.5 .. 4.25 s: still inside the 3-s end guard
+    assert out == [] and "init" not in w.book.fired                   # not proposed, and not consumed either
+    (_, side, o2), = _btc_ramp(w, 6.5, [100018.0, 100020.0, 100022.0, 100024.0])
+    assert side == "UP" and o2.size == pytest.approx(10.0) and "init" in w.book.fired
+
+
+def test_opt_failed_initial_order_is_resent_after_the_30_s_window_to_the_rising_token():
+    w = _O()
+    (_, _, o), = _btc_ramp(w, 0.25, [100000.0] * 8 + [100002.0, 100004.0, 100006.0, 100008.0])
+    w.e.on_pair_done(o.order_id, filled=False)
+    w.e.end_guard["UP"] = T0 + 41_500.0                               # the last BTC direction (UP) is still ending until 41.5 s
+    # 40 s after the open: BTC flat (no 2-s signal) but DOWN is rising in the book -> the re-order goes to DOWN
+    out = []
+    for i in range(12):
+        t = 40.0 + i * 0.25
+        out += w.step(t, 100008.0, up=(0.44, 0.45), dn=(0.54 + 0.005 * i, 0.55 + 0.005 * i))
+    sent = [(s, o2) for _, s, o2 in out if s]
+    assert sent and sent[0][0] == "DOWN" and sent[0][1].size == pytest.approx(10.0)
+    assert w.book.opt_init_tries == 1 and "init" in w.book.fired
+    # a market whose first 30 s never had a signal gets no late initial entry
+    w2 = _O()
+    assert _btc_ramp(w2, 0.25, [100000.0] * 12) == []
+    out = []
+    for i in range(12):
+        out += w2.step(40.0 + i * 0.25, 100000.0, up=(0.44, 0.45), dn=(0.54 + 0.005 * i, 0.55 + 0.005 * i))
+    assert [s for _, s, _ in out if s] == [] and "init" not in w2.book.fired

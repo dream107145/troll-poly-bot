@@ -47,6 +47,7 @@ module.exports = {
         TPB_RTR_OPT_INIT_BPS: '0.3',
         TPB_RTR_OPT_INIT_SHARES: '10',
         TPB_RTR_OPT_INIT_MAX_S: '30',
+        TPB_RTR_OPT_INIT_RETRY_MAX_S: '0',       // a failed initial order is re-sent until it fills (0 = until the close guard)
         TPB_RTR_OPT_PRICE_MIN: '0.10',
         TPB_RTR_OPT_PRICE_MAX: '0.90',
         TPB_RTR_OPT_EVAL_INTERVAL_S: '6',
