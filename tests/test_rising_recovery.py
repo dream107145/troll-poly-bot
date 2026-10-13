@@ -1288,7 +1288,7 @@ def test_opt_optimizer_buys_the_quantity_that_raises_the_worst_case_then_stops()
     assert side == "DOWN"                                             # the losing outcome is the one to lift
     eff = 0.45 + FeeSchedule().taker_fee_per_share(0.45) + 0.01
     best_q = max((5.0, 10.0, 15.0, 20.0), key=lambda q: min(b.U, b.D + q) - (b.C + q * eff))
-    assert o2.size == pytest.approx(best_q)                           # the W-maximising quantity
+    assert best_q == 10.0 and o2.size == pytest.approx(5.0)           # the W-maximising quantity, capped at 1/2 of the 10 UP held (the user 10-13)
     w.fill(o2, 9.5, price=0.45)
     assert min(b.U, b.D) - b.C > w0 + 0.05
     out = _btc_ramp(w, 15.0, [100008.0] * 4)                          # the next timer: nothing raises W by 0.05 -> no trade
@@ -1457,11 +1457,66 @@ def test_opt_strict_mode_never_pairs_the_rising_token_with_the_dear_one():
     w = _O(opt_require_positive="both")
     b = w.e._book(w.m)                                                # noqa: SLF001
     b.fired.add("init")
-    b.add("UP", 10.0, 0.40, 0.17)                                     # the momentum buys: 10 UP for 4.17
-    out = _btc_ramp(w, 5.0, [100000.0] * 28, up=(0.39, 0.40), dn=(0.66, 0.67))   # 5 .. 11.75 s: the 6-s timer runs
+    b.add("UP", 10.0, 0.30, 0.10)                                     # the momentum buys: 10 UP for 3.10
+    out = _btc_ramp(w, 5.0, [100000.0] * 28, up=(0.29, 0.30), dn=(0.66, 0.67))   # 5 .. 11.75 s: the 6-s timer runs
     assert out == [] and b.D == 0.0                                   # DOWN at 0.67 would leave PnL_Down < 0: no pair
-    out = _btc_ramp(w, 12.0, [100000.0] * 28, up=(0.39, 0.40), dn=(0.29, 0.30))  # both tokens cheap: both outcomes > 0
+    out = _btc_ramp(w, 12.0, [100000.0] * 28, up=(0.29, 0.30), dn=(0.29, 0.30))  # both tokens cheap: both outcomes > 0
     (_, side, o), = out
-    assert side == "DOWN"
+    assert side == "DOWN" and o.size == pytest.approx(5.0)            # and at most 1/2 of the 10 UP held
     w.fill(o, 19.0, price=0.30)
     assert b.U - b.C > 0 and b.D - b.C > 0
+
+
+def _ramp_steps(w, t0, prices, side, dt=0.5, fill=True, sent=None):
+    """Walk one token's mid through ``prices`` (the other token mirrors it), filling every order sent."""
+    sent = [] if sent is None else sent
+    for i, d in enumerate(prices):
+        t = t0 + i * dt
+        a, bb = round(d - 0.01, 2), d
+        oa, ob = round(1 - d - 0.02, 2), round(1 - d - 0.01, 2)
+        out = w.step(t, 100000.0, up=((a, bb) if side == "UP" else (oa, ob)), dn=((a, bb) if side == "DOWN" else (oa, ob)))
+        for _, s_, o_ in out:
+            sent.append((t, s_, o_.size))
+            if fill:
+                w.fill(o_, t + 0.1, price=d if s_ == side else ob)
+                w.e.on_pair_done(o_.order_id, filled=True)
+                w.e.end_guard.clear()
+    return sent
+
+
+def test_opt_momentum_phase_follows_any_token_rising_through_0_35_to_0_65_every_5_s():
+    # the user 10-13: "If a token rising between 0.35-0.65, buy the token every 5s"
+    w = _O(opt_mom_low=0.35, opt_mom_high=0.65, opt_mom_target=0.65, opt_mom_interval_s=5.0, opt_mom_shares=5.0)
+    b = w.e._book(w.m)                                                # noqa: SLF001
+    b.fired.add("init")
+    sent = _ramp_steps(w, 5.0, [round(0.50 + 0.005 * i, 3) for i in range(28)], "UP")   # UP, the dearer token, 0.50 -> 0.635 over 13.5 s
+    assert sent and all(s_ == "UP" and q == pytest.approx(5.0) for _, s_, q in sent)
+    gaps = [t2 - t1 for (t1, _, _), (t2, _, _) in zip(sent, sent[1:])]
+    assert gaps and min(gaps) >= 5.0 - 1e-9                           # every 5 s
+    assert b.opt_in_mom and b.opt_mom_side == "UP"
+    _ramp_steps(w, 19.0, [0.64, 0.65, 0.66, 0.66], "UP")              # 0.65 reached: the phase ends
+    assert not b.opt_in_mom
+    n = len(sent)
+    _ramp_steps(w, 21.0, [0.67 + 0.01 * i for i in range(10)], "UP", sent=sent)   # above the zone: no more momentum buys
+    assert len([x for x in sent[n:] if x[2] == 5.0 and x[1] == "UP"]) == 0
+
+
+def test_opt_opposite_token_waits_5_s_after_the_first_buy_and_is_capped_at_half_the_holding():
+    # the user 10-13: "After first buy, do not buy opposite token in 5s. And opposite token amount should be 1/2 of holding shares."
+    w = _O(opt_require_positive="both", opt_quantities="5,10,15,20")
+    b = w.e._book(w.m)                                                # noqa: SLF001
+    b.fired.add("init")
+    b.add("UP", 10.0, 0.30, 0.10)                                     # the first buy at 5.0 s: 10 UP for 3.10
+    b.first_fill_t = T0 + 5_000.0
+    flat = lambda t0, n: [w.step(t0 + i * 0.5, 100000.0, up=(0.29, 0.30), dn=(0.29, 0.30)) for i in range(n)]   # both cheap: both outcomes can be > 0
+    out = sum(flat(5.5, 8), [])                                       # 5.5 .. 9.0 s: inside the 5 s after the first buy
+    assert out == [] and b.D == 0.0
+    out = sum(flat(10.5, 12), [])                                     # the timer after 10 s: the opposite token, half the holding
+    sides = [(s_, o_.size) for _, s_, o_ in out]
+    assert sides and sides[0] == ("DOWN", pytest.approx(5.0))         # not 10, 15 or 20
+    w.fill(out[0][2], 11.0, price=0.30)
+    w.e.on_pair_done(out[0][2].order_id, filled=True)
+    w.e.end_guard.clear()
+    assert b.U - b.C > 0 and b.D - b.C > 0
+    out = sum(flat(17.0, 14), [])                                     # DOWN already at 1/2 of UP: nothing more
+    assert [s_ for _, s_, _ in out] == []

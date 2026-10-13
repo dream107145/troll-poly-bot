@@ -262,7 +262,9 @@ class RisingRecoveryConfig(BookMomentumConfig):
     opt_mom_low: float = 0.30
     opt_mom_high: float = 0.40
     opt_mom_target: float = 0.50             # assumed target: logged as a projection and ends the momentum phase
-    opt_mom_shares: float = 5.0              # momentum phase: buy this many of the lower-priced token every opt_mom_interval_s (0 = run the optimizer instead)
+    opt_mom_shares: float = 5.0              # momentum phase: buy this many of the rising token every opt_mom_interval_s (0 = run the optimizer instead)
+    opt_opposite_delay_s: float = 5.0        # no buy of the opposite token (the side held less) within this many s of the market's first fill
+    opt_opposite_ratio: float = 0.5          # the opposite token is held at most this fraction of the leader's shares
     opt_quantities: str = "5,10,15,20"       # candidate quantities (no-trade is always a candidate)
     opt_min_improvement: float = 0.05        # a buy must raise the worst-case PnL by at least this to be worth its costs
     opt_tie_eps: float = 0.01                # worst cases within this are "effectively equal": the best case decides
@@ -370,6 +372,7 @@ class MarketBook:
         self.opt_n = 0
         self.opt_init_filled = 0.0
         self.opt_init_tries = 0
+        self.first_fill_t: float | None = None
         self._tops = None                    # the latest books (for the liquidation / outcome reports)
         self.guard_n = 0
         self.climb_peak: float | None = None # the climbed token's highest mid since its last climb fill
@@ -1708,18 +1711,26 @@ class RisingRecoveryEngine(BookMomentumEngine):
             if rising and b.opt_rise_armed[s_]:
                 events.append(f"rise:{s_}")
             b.opt_rise_armed[s_] = not rising
-        if mids["UP"] is not None and mids["DOWN"] is not None and (b.opt_in_mom or mids["UP"] != mids["DOWN"]):
-            # the phase follows the token it started on, even once it is no longer the lower-priced one
-            low_side = b.opt_mom_side if b.opt_in_mom and b.opt_mom_side else ("UP" if mids["UP"] < mids["DOWN"] else "DOWN")
-            lm = mids[low_side]
-            t3 = self._price_at(tops[low_side][0], now - 3000.0, 1), self._price_at(tops[low_side][0], now - 3000.0, 2)
-            m3 = (t3[0] + t3[1]) / 2.0 if t3[0] is not None and t3[1] is not None else None
-            sig = self.signal(tops[low_side][0], low_side, now)
-            trending = m3 is not None and lm > m3 + 1e-9 and sig is not None and sig.confirmed
-            if not b.opt_in_mom and sc.opt_mom_low - 1e-9 <= lm <= sc.opt_mom_high + 1e-9 and trending:
-                b.opt_in_mom, b.opt_mom_peak, b.opt_mom_side = True, lm, low_side
-                self._opt_log(b, "momentum-start", "monitor", now, side=low_side, mid=round(lm, 4))
-            elif b.opt_in_mom:
+        if mids["UP"] is not None and mids["DOWN"] is not None:
+            # the momentum phase (the user 10-13): a token rising inside the zone is bought every opt_mom_interval_s;
+            # the phase follows the token it started on until the target / a 2c reversal / leaving the zone
+            cands = [b.opt_mom_side] if b.opt_in_mom and b.opt_mom_side else \
+                [s_ for s_ in ("UP", "DOWN") if sc.opt_mom_low - 1e-9 <= mids[s_] <= sc.opt_mom_high + 1e-9]
+            info = {}
+            for s_ in cands:
+                t3 = self._price_at(tops[s_][0], now - 3000.0, 1), self._price_at(tops[s_][0], now - 3000.0, 2)
+                m3 = (t3[0] + t3[1]) / 2.0 if t3[0] is not None and t3[1] is not None else None
+                info[s_] = (m3, self.signal(tops[s_][0], s_, now))
+            if not b.opt_in_mom:
+                rising = [(mids[s_] - m3, s_) for s_, (m3, sig) in info.items()
+                          if m3 is not None and mids[s_] > m3 + 1e-9 and sig is not None and sig.confirmed]
+                if rising:
+                    _, side = max(rising)
+                    b.opt_in_mom, b.opt_mom_peak, b.opt_mom_side = True, mids[side], side
+                    self._opt_log(b, "momentum-start", "monitor", now, side=side, mid=round(mids[side], 4))
+            else:
+                side = b.opt_mom_side
+                lm = mids[side]
                 b.opt_mom_peak = max(b.opt_mom_peak or lm, lm)
                 why = None
                 if lm >= sc.opt_mom_target - 1e-9:
@@ -1727,10 +1738,10 @@ class RisingRecoveryEngine(BookMomentumEngine):
                 elif lm <= (b.opt_mom_peak or lm) - 0.02 + 1e-9:
                     why = "the trend reversed"
                 elif lm < sc.opt_mom_low - 1e-9:
-                    why = "left the zone"
+                    why = "left the zone"                  # above the zone the phase runs on until the target
                 if why:
                     b.opt_in_mom, b.opt_mom_peak, b.opt_mom_side = False, None, None
-                    self._opt_log(b, "momentum-end", "monitor", now, side=low_side, mid=round(lm, 4), reason=why)
+                    self._opt_log(b, "momentum-end", "monitor", now, side=side, mid=round(lm, 4), reason=why)
                 elif now - b.opt_mom_last_t >= sc.opt_mom_interval_s * 1000.0:
                     events.append("momentum")
         if not events:
@@ -1759,7 +1770,10 @@ class RisingRecoveryEngine(BookMomentumEngine):
         # opt_mom_interval_s in a fixed amount until the phase ends (target reached / trend reversed / left the zone)
         if "momentum" in events and sc.opt_mom_shares > 0 and b.opt_mom_side is not None:
             side = b.opt_mom_side
-            filled, vwap, eff, why = self._opt_simulate(b, m, tops, side, sc.opt_mom_shares)
+            cap, why = self._opt_opposite_cap(b, side, now)
+            qty = sc.opt_mom_shares if cap is None else min(sc.opt_mom_shares, cap)
+            filled, vwap, eff, why2 = (0.0, None, None, None) if why else self._opt_simulate(b, m, tops, side, qty)
+            why = why or why2
             if why:
                 self._opt_log(b, tag, "skip", now, reason=f"momentum {side}: {why}")
             elif self._resting_on(tops[side][0]) is not None:
@@ -1778,7 +1792,14 @@ class RisingRecoveryEngine(BookMomentumEngine):
             if self._resting_on(tops[side][0]) is not None:
                 notes.append(f"{side}: an order is still ending")
                 continue
-            for q in (float(x) for x in str(sc.opt_quantities).split(",") if x.strip()):
+            cap, why_o = self._opt_opposite_cap(b, side, now)
+            if why_o:
+                notes.append(f"{side}: {why_o}")
+                continue
+            qs = [float(x) for x in str(sc.opt_quantities).split(",") if x.strip()]
+            if cap is not None:
+                qs = sorted({min(q, cap) for q in qs})
+            for q in qs:
                 filled, vwap, eff, why = self._opt_simulate(b, m, tops, side, q)
                 if why:
                     notes.append(f"{side} {q:g}: {why}")
@@ -1798,6 +1819,21 @@ class RisingRecoveryEngine(BookMomentumEngine):
             return None
         return self._opt_send(b, m, tops, best["side"], best["qty"], best["eff"], tag, "opt_buy", now,
                               worst_now=round(w0, 4), best_now=round(b0, 4), worst_after=round(best["w"], 4), best_after=round(best["b"], 4))
+
+    def _opt_opposite_cap(self, b, side, now):
+        """The user 10-13: the opposite token (the side held less than the other) is not bought within
+        opt_opposite_delay_s of the market's first fill, and is held at most opt_opposite_ratio of the leader's
+        shares. Returns (cap on the shares to buy or None when ``side`` is not the opposite token, reason to skip)."""
+        sc = self.scfg
+        mine, other = (b.U, b.D) if side == "UP" else (b.D, b.U)
+        if other <= 0 or other <= mine:
+            return None, None
+        if b.first_fill_t is not None and now - b.first_fill_t < sc.opt_opposite_delay_s * 1000.0:
+            return 0.0, f"opposite token within {sc.opt_opposite_delay_s:g} s of the first buy"
+        cap = sc.opt_opposite_ratio * other - mine
+        if cap < 5.0 - 1e-9:                                          # the venue minimum order
+            return 0.0, f"opposite token already at {sc.opt_opposite_ratio:g} x the holding"
+        return cap, None
 
     def _opt_projection(self, b, mids) -> float:
         """The mark-to-market PnL if the lower-priced token were at the assumed momentum target."""
@@ -1977,6 +2013,8 @@ class RisingRecoveryEngine(BookMomentumEngine):
         q, px, fee = float(fill.size), float(fill.price), float(getattr(fill, "fee", 0.0) or 0.0)
         kind = sent.get("kind", "untracked")
         paired = b.add(side, q, px, fee)
+        if b.first_fill_t is None:
+            b.first_fill_t = now
         if kind in ("entry", "buy_take", "fix", "fix_take", "hedge", "hedge_take", "cover_bid", "cover_take") or kind.startswith(("spot_", "opt_")):
             b.cycle_fills += 1
             b.cycle_cost += q * px + fee

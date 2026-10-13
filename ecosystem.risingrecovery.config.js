@@ -51,11 +51,13 @@ module.exports = {
         TPB_RTR_OPT_PRICE_MIN: '0.10',
         TPB_RTR_OPT_PRICE_MAX: '0.90',
         TPB_RTR_OPT_EVAL_INTERVAL_S: '6',
-        TPB_RTR_OPT_MOM_INTERVAL_S: '3',
-        TPB_RTR_OPT_MOM_LOW: '0.30',
-        TPB_RTR_OPT_MOM_HIGH: '0.40',
-        TPB_RTR_OPT_MOM_TARGET: '0.50',
-        TPB_RTR_OPT_MOM_SHARES: '5',             // momentum phase: buy 5 of the lower-priced token every 3 s (0 = optimizer)
+        TPB_RTR_OPT_MOM_INTERVAL_S: '5',
+        TPB_RTR_OPT_MOM_LOW: '0.35',
+        TPB_RTR_OPT_MOM_HIGH: '0.65',
+        TPB_RTR_OPT_MOM_TARGET: '0.65',
+        TPB_RTR_OPT_MOM_SHARES: '5',             // momentum phase (the user 10-13): a token rising in 0.35..0.65 is bought 5 sh every 5 s (0 = optimizer)
+        TPB_RTR_OPT_OPPOSITE_DELAY_S: '5',       // no opposite-token buy within 5 s of the first buy
+        TPB_RTR_OPT_OPPOSITE_RATIO: '0.5',       // the opposite token is held at most 1/2 of the leader's shares
         TPB_RTR_OPT_QUANTITIES: '5,10,15,20',
         TPB_RTR_OPT_MIN_IMPROVEMENT: '0.05',
         TPB_RTR_OPT_TIE_EPS: '0.01',
