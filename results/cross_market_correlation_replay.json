@@ -1,0 +1,14 @@
+{
+  "train": 300,
+  "validation": 150,
+  "test": 150,
+  "val_avg_log_score": {
+    "model": -1.3128089961928433,
+    "agree": -1.2609148551049987,
+    "indep": -1.3862943611198926
+  },
+  "test_mean_ev1": 0.040112867491263,
+  "test_mean_realized_c1": 0.09999999999999977,
+  "high_correlation_label": "STATISTICAL_CANDIDATE",
+  "note": "Synthetic smoke only \u2014 not a claim of live profitability. Enable statistical mode only after real OOS + paper validation."
+}

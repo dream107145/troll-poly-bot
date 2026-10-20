@@ -185,6 +185,36 @@ def check_cheapside(strategy: str, mode: str, env: dict | None = None) -> None:
         raise SystemExit(f"refusing cheapside in {mode}: this strategy is paper only and has no real-money switch")
 
 
+def check_cross_market_arb(strategy: str, mode: str, env: dict | None = None) -> None:
+    """cross_market_arb is behind TPB_CMA_ENABLED=1 and has NO real-money switch:
+    shadow, micro-live and live are refused whatever the environment says."""
+    if strategy != "cross_market_arb":
+        return
+    env = os.environ if env is None else env
+    on = lambda k: (env.get(k) or "").strip().lower() in ("1", "true", "yes")   # noqa: E731
+    if not on("TPB_CMA_ENABLED"):
+        raise SystemExit("the cross_market_arb strategy is behind a feature flag: set TPB_CMA_ENABLED=1")
+    if mode in ("micro-live", "live", "shadow"):
+        raise SystemExit(
+            f"refusing cross_market_arb in {mode}: this strategy is paper only and has no real-money switch")
+
+
+def check_cross_market_correlation(strategy: str, mode: str, env: dict | None = None) -> None:
+    """cross_market_correlation is behind TPB_CMC_ENABLED=1 and has NO real-money switch:
+    shadow, micro-live and live are refused whatever the environment says."""
+    if strategy != "cross_market_correlation":
+        return
+    env = os.environ if env is None else env
+    on = lambda k: (env.get(k) or "").strip().lower() in ("1", "true", "yes")   # noqa: E731
+    if not on("TPB_CMC_ENABLED"):
+        raise SystemExit(
+            "the cross_market_correlation strategy is behind a feature flag: set TPB_CMC_ENABLED=1")
+    if mode in ("micro-live", "live", "shadow"):
+        raise SystemExit(
+            f"refusing cross_market_correlation in {mode}: this strategy is paper only and has no "
+            "real-money switch")
+
+
 def check_rising_recovery(strategy: str, mode: str, env: dict | None = None) -> None:
     """RISING-TOKEN RECOVERY (strategy/rising_recovery.py) is behind TPB_RTR_ENABLED=1 and has NO real-money switch:
     shadow, micro-live and live are refused whatever the environment says (the user's spec, 2026-10-09)."""
@@ -196,6 +226,19 @@ def check_rising_recovery(strategy: str, mode: str, env: dict | None = None) -> 
         raise SystemExit("the rising_recovery strategy is behind a feature flag: set TPB_RTR_ENABLED=1")
     if mode in ("micro-live", "live", "shadow"):
         raise SystemExit(f"refusing rising_recovery in {mode}: this strategy is paper only and has no real-money switch")
+
+
+def check_leader_pair(strategy: str, mode: str, env: dict | None = None) -> None:
+    """Keep LEADER_PAIR paper-only until a positive, cost-inclusive out-of-sample result is demonstrated."""
+    if strategy != "leader_pair":
+        return
+    env = os.environ if env is None else env
+    on = lambda k: (env.get(k) or "").strip().lower() in ("1", "true", "yes")   # noqa: E731
+    if not on("TPB_LP_ENABLED"):
+        raise SystemExit("the leader_pair strategy is behind a feature flag: set TPB_LP_ENABLED=1")
+    if mode != "paper":
+        raise SystemExit(f"refusing leader_pair in {mode}: combined strategy is unproven and paper-only until "
+                         "a positive, cost-inclusive out-of-sample backtest is demonstrated")
 
 
 def check_book_momentum(strategy: str, mode: str, env: dict | None = None) -> None:
@@ -350,7 +393,10 @@ def main() -> None:
                     default=None,
                     help="paper execution scenario (default realistic; TPB_EXECUTION_SCENARIO). venue_lag "
                          "matches against the local book 500 ms after arrival instead of the quote-survival rule")
-    ap.add_argument("--strategy", choices=("analytic", "momentum_taker", "spot_lag", "repriced_momentum", "cheapside", "late_confidence", "book_momentum", "rising_recovery", "confirmation_momentum", "preopen_maker", "copytrade",
+    ap.add_argument("--strategy", choices=("analytic", "momentum_taker", "spot_lag", "repriced_momentum", "cheapside",
+                                           "cross_market_arb", "cross_market_correlation", "late_confidence",
+                                           "book_momentum", "rising_recovery",
+                                           "leader_pair", "confirmation_momentum", "preopen_maker", "copytrade",
                                            "fastclip", "btc_trend_reversal_hedge", "triangle"),
                     default=None,
                     help="decision engine: analytic (default), the experimental momentum_taker "
@@ -404,9 +450,12 @@ def main() -> None:
     check_spot_lag(cfg.engine.strategy, args.mode)
     check_repriced_momentum(cfg.engine.strategy, args.mode)
     check_cheapside(cfg.engine.strategy, args.mode)
+    check_cross_market_arb(cfg.engine.strategy, args.mode)
+    check_cross_market_correlation(cfg.engine.strategy, args.mode)
     check_late_confidence(cfg.engine.strategy, args.mode)
     check_book_momentum(cfg.engine.strategy, args.mode)
     check_rising_recovery(cfg.engine.strategy, args.mode)
+    check_leader_pair(cfg.engine.strategy, args.mode)
     check_confirmation_momentum(cfg.engine.strategy, args.mode)
     check_preopen_maker(cfg.engine.strategy, args.mode)
     check_copytrade(cfg.engine.strategy, args.mode)
@@ -435,12 +484,16 @@ def main() -> None:
         scenario, mode, momentum, spot_lag = cfg.execution_scenario, cfg.deploy_mode, cfg.momentum, cfg.spot_lag
         repriced, cheap, clip, hedge, tri = (cfg.repriced_momentum, cfg.cheapside, cfg.fastclip, cfg.btc_hedge,
                                              cfg.triangle)
+        cma = cfg.cross_market_arb
+        cmc = cfg.cross_market_correlation
         cm = cfg.confirmation_momentum
         pom = cfg.preopen_maker
         copy = cfg.copytrade
         cfg = BotConfig(engine=cfg.engine, mode="live")
         cfg.execution_scenario, cfg.deploy_mode, cfg.momentum, cfg.spot_lag = scenario, mode, momentum, spot_lag
         cfg.repriced_momentum, cfg.cheapside, cfg.fastclip, cfg.btc_hedge = repriced, cheap, clip, hedge
+        cfg.cross_market_arb = cma
+        cfg.cross_market_correlation = cmc
         cfg.triangle = tri
         cfg.confirmation_momentum = cm
         cfg.preopen_maker = pom

@@ -47,12 +47,34 @@ Spot-lag, momentum and repriced-momentum are unchanged (their tests: 169 passed)
    from the fast feed, not inputs.
 4. **Support**: the 1 s spot return points the cheap side's way and 2 of the 3 short horizons agree.
 5. **Edge**: `model_p − limit − taker fee(limit) − 0.5c ≥ 0.05`, the limit being ask + 1c.
-6. **Order**: FOK for 10 shares (≤ $3.50; cap $5), one position per market, at most 3 orders per
-   market ≥ 2 s apart, 60 buys/h, 4 markets at once, $20 total, $10 daily loss.
-7. **Exit**: none. Every position settles at 1 / 0 (one fee, no exit). The kill file and the risk halts
-   stop new entries; nothing sells early. Both sides are never bought (one position per market).
+6. **Model entry**: FOK for 10 shares (≤ $3.50; cap $5), one model entry per market, at most 3 model-entry
+   attempts per market ≥ 2 s apart, 60 buys/h; shared risk limits cap open markets and total exposure.
+7. **Exit**: none. Every position settles at 1 / 0 (one fee, no exit). The kill file and risk halts
+   stop new orders; nothing sells early. The portfolio recovery below can add the opposite side to an open market.
 8. Thresholds (band, 3c, 5c, 1c, 10 shares, support) were fixed before the simulation and not tuned
    on any period.
+
+## Portfolio lower-side and leader recovery (2026-10-16)
+
+The Cheapside paper strategy now coordinates its open positions across BTC, ETH, SOL, XRP, DOGE, BNB, and HYPE.
+It records each filled side and its fee-inclusive cost. After the current lower-priced outcome is held in every
+currently open position (at least the venue minimum), it sums P&L in the scenario where each market's higher-mid
+outcome wins. If that combined scenario is below `portfolio_repair_target_usdc` (+$2), it buys the current leader
+with the lowest ask across those markets. The quantity targets +$2, subject to existing order, exposure, balance,
+book, and venue limits; when limits prevent the full target, it buys a safe clip and recalculates after the fill.
+These additional buys add the opposite outcome to an existing position. The paper launcher sets a 2-second retry
+cooldown and retains the strategy's existing total-exposure cap.
+
+## 2026-10-16 basket entry ordering
+
+When the six-cheapest average ask falls below $0.20, the bot starts submitting cheap-side orders immediately; it
+does not wait for the seventh-market leader price or a full-basket P&L preflight. Each cheap order still must pass
+its own fresh-quote, spread, depth, time-window, balance, and risk checks. Once all six cheap legs fill, it waits
+until the planned leader ask is strictly above $0.70, then sizes and buys that leader. Leader retries use the
+existing cooldown and risk, balance, quote, and time limits, so a fill is not guaranteed if those limits or the
+market close prevent further orders. Cheap-side FAK misses and partial fills retry after the cooldown until each
+leg reaches its target; the ordinary three-attempt signal cap does not strand a basket. The decision record
+reports the current average-ask trigger, pending legs, or leader wait reason.
 
 ## Periods
 
@@ -221,3 +243,34 @@ actual settlement on its fills, by price bucket, and (d) forward net per trade. 
 supported by train and validation alone and could be a second, parallel paper app if the first shows
 life: **ask ≥ 0.20** (the $0.05–0.20 buckets are ≤ 0 on train and validation) and **≥ 120 s left**
 (under 60 s is negative on train). Nothing else is justified without looking at test / forward.
+
+## 2026-10-15 paper safety review
+
+The live paper run had reached −$27.34 from its $100 starting balance, with 29 resolved outcomes
+(2 wins, 27 losses) and 42 unresolved outcomes that were temporarily marked rather than settled.
+Some recent fills had negative model edge because `force_one_per_market` was enabled; this bypassed
+the model-edge and spot-support gates. The forward replay shows that trading every supported cheap
+ask without the model lost $3,499, while the model plus the 5c edge filter earned $508. This fallback
+is disabled. New cheap-side entries are restricted to asks ≥ $0.20 and the first minute (240–300 s
+remaining), where the forward replay was strongest. The separate leader-entry exception is disabled
+because it was not independently validated. The requested portfolio repair remains enabled.
+
+The paper bot now has no daily-loss halt. Its maximum open exposure is $20 and its per-run drawdown
+halt is $15. A PM2 restart starts a fresh $100 paper balance; the trade history remains tagged and
+appended, so results must be evaluated across restarts from the ledger rather than the current-run
+balance alone. None of these paper results guarantees future profits.
+
+## 2026-10-15 six-cheap basket paper configuration
+
+Cheapside now has a configured basket mode for its seven synchronized 5-minute crypto markets. It waits for
+fresh books across all seven, ranks each market's lower ask, and triggers when the six lowest asks average
+below $0.20. It submits five-share cheap-side orders immediately, then waits for all six fills and a leader ask
+above $0.70 before buying the remaining market's leader. The leader quantity is sized from fee-inclusive limit
+prices toward at least $0.01 in both aligned cases: all seven leaders win, and all seven leaders lose. Each
+order is subject to its own cash, spread/depth, time, and risk checks; a leader that cannot satisfy both scenario
+targets may not complete the basket.
+Basket selection and fills persist across restarts.
+
+This does not guarantee profit under arbitrary mixed outcomes. With one-sided binary positions, any particular
+token can lose; the check covers the two correlated all-leaders outcomes in the request. Paper results also
+depend on actual fills at or below the submitted limits.

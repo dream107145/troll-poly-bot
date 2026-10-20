@@ -30,6 +30,8 @@ def test_every_tunable_points_at_a_real_attribute():
     holders = {"engine": cfg.engine, "risk": cfg.risk, "caps": caps, "spot_lag": cfg.spot_lag,
                "micro": MicroCaps(), "triangle": cfg.triangle, "pairlock": RecoveryParams(),
                "pairbtc": RecoveryParams()}
+    from troll_poly_bot.strategy.leader_pair import LeaderPairConfig
+    holders["lp"], holders["rtr"] = LeaderPairConfig(), cfg.rising_recovery
     for key, t in TUNABLES.items():
         assert t.target in holders, key
         assert hasattr(holders[t.target], t.attr), key

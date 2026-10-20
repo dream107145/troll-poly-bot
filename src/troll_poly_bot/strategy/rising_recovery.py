@@ -202,6 +202,20 @@ class RisingRecoveryConfig(BookMomentumConfig):
     fix_high: bool = True                    # momentum mode: buy the favourite when its winning outcome is negative
     high_min_mid: float = 0.55               # the favourite: mid at least this
     high_win_target_usdc: float = 0.10       # ... and the P&L if it wins must reach this
+    fix_max_left_s: float = 210.0            # the user 10-14: the fix runs only with at most this many seconds left ...
+    fix_require_rising: bool = True          # ... and only while the favourite is rising (mid above its mid 5 s ago by 1c)
+    fix_rise_window_s: float = 5.0
+    fix_min_rise: float = 0.01
+    opt_pair_enabled: bool = True            # the user 10-14 ("if buying a token makes pairs under 0.95 in total, buy the amount"):
+    opt_pair_threshold: float = 0.95         # the side opposite the unpaired lots is bought, lot by lot (oldest first), while
+                                             # lot unit + ask + fee <= this, in the number that completes those pairs.
+                                             # target_profit_usdc then LOCKS the market: worst outcome >= it -> no more buys
+    opt_hedge_enabled: bool = True           # the user 10-14: the lower-priced token with its ask <= hedge_max_price is
+    opt_hedge_min_best_usdc: float = 2.0     # bought, when the worst outcome is negative, up to the size that keeps the
+                                             # best outcome at this (never past the point where both outcomes are equal)
+    fix_min_ask: float = 0.50                # OPT mode fix (the user 10-13 21:xx): the favourite's ask must be in
+    fix_max_ask: float = 0.80                # [fix_min_ask, fix_max_ask] -- then, if the P&L should it win is negative,
+                                             # it is bought up to high_win_target_usdc (5). Both settable on the dashboard.
     fix_max_price: float = 1.0               # no fix above this all-in price (10-12 02:04: fixes at 0.93-0.99 wanted
                                              # 59 -> 4,735 shares: n = need / (1 - price) explodes near 1)
     fix_max_per_market: int = 0              # fix fills a market may take (0 = no limit; 10-12 02:38 fixes flip-flopped
@@ -263,12 +277,42 @@ class RisingRecoveryConfig(BookMomentumConfig):
     opt_mom_high: float = 0.40
     opt_mom_target: float = 0.50             # assumed target: logged as a projection and ends the momentum phase
     opt_mom_shares: float = 5.0              # momentum phase: buy this many of the rising token every opt_mom_interval_s (0 = run the optimizer instead)
+    # the user 10-14 ("if the lower token starts rising, buy it; after 3 s, if it still rises wait, if it stopped or falls
+    # buy the top-side tokens; lower limit 0.15"): the phase follows the LOWER-priced token only, buys at once when it
+    # starts rising, and opt_mom_check_s after every momentum buy checks the mid: at least opt_mom_check_min_rise above
+    # the buy's mid = still rising (wait for the next step); otherwise the top-side token is bought in opt_mom_cover_ratio x
+    # that buy's shares and the phase ends; a passed check re-arms itself every opt_mom_check_s. A 2c reversal ends the
+    # phase the same way (with the cover).
+    # the user 10-14 ("in 0.4-0.6, buy the rising token +3c above the last purchase price; out of the range reset the last
+    # price to 0.35 -- to prevent too many purchases in the range"): a per-market LADDER reference that survives across
+    # rises: inside [ladder_low, ladder_high] a momentum buy (the start buy too) needs mid >= reference + opt_mom_step;
+    # every momentum buy sets the reference to its mid; while the mid is outside the range the reference is ladder_reset
+    opt_mom_ladder_enabled: bool = True
+    opt_mom_ladder_low: float = 0.40
+    opt_mom_ladder_high: float = 0.60
+    opt_mom_ladder_reset: float = 0.35
+    opt_mom_lower_only: bool = True
+    opt_mom_buy_at_start: bool = True
+    opt_mom_check_s: float = 3.0
+    opt_mom_check_min_rise: float = 0.01
+    opt_mom_cover: bool = True
+    opt_mom_cover_ratio: float = 1.0
+    opt_mom_trigger: str = "step"            # the user 10-14: "buy it every 3c increase, not every 5 s" -> "step": a buy each time
+    opt_mom_step: float = 0.03               # the mid is opt_mom_step above the mid at the last momentum buy (or the phase start);
+                                             # "timer": every opt_mom_interval_s (the 10-13 rule)
     opt_opposite_delay_s: float = 5.0        # no buy of the opposite token (the side held less) within this many s of the market's first fill
     opt_opposite_ratio: float = 0.5          # the opposite token is held at most this fraction of the leader's shares
     opt_quantities: str = "5,10,15,20"       # candidate quantities (no-trade is always a candidate)
     opt_min_improvement: float = 0.05        # a buy must raise the worst-case PnL by at least this to be worth its costs
     opt_tie_eps: float = 0.01                # worst cases within this are "effectively equal": the best case decides
     opt_require_positive: str = "none"       # "both": only buys that leave BOTH outcomes > 0 (else "infeasible", skipped)
+    opt_exec_mode: str = "speed"             # the user 10-14 ("if the price changes quickly use taker, else maker"): "speed" = the
+    opt_speed_window_ms: float = 1000.0      # whole buy is taken when the token's mid moved at least opt_speed_threshold over
+    opt_speed_threshold: float = 0.02        # opt_speed_window_ms (or there is no history), else the whole buy rests as a post-only
+                                             # bid; "mixed" = the opt_maker_fraction split; "taker" = all taken
+    opt_maker_fraction: float = 0.0          # the user 10-14 ("mix maker and taker fills"): this fraction of every opt buy rests
+    opt_maker_rest_s: float = 10.0           # as a post-only bid at the bid (+1 tick on a 2c+ spread, no fee) for this long;
+                                             # the rest is taken at once. Under 5 shares a part, the whole buy is taken.
     spot_lowrise_enabled: bool = False       # the user 21:2x: the LOWER-priced token starting to rise (the book signal:
     spot_lowrise_shares: float = 10.0        # ask +min_rise over lookback_ms on rising updates) is bought this many shares,
     spot_lowrise_max_per_market: int = 2     # once per rise, up to this many buys a market; the guard then recovers
@@ -367,6 +411,12 @@ class MarketBook:
         self.opt_in_mom = False
         self.opt_mom_peak: float | None = None
         self.opt_mom_side: str | None = None
+        self.opt_mom_ref: float | None = None   # the mid at the last momentum buy (or the phase start): the next step is measured from it
+        self.opt_mom_check_t: float | None = None   # the 3-s check after a momentum buy: when, and the mid at the buy
+        self.opt_mom_check_px: float | None = None
+        self.opt_mom_last_qty: float = 0.0           # shares of the last momentum buy (the cover matches it)
+        self.opt_mom_ladder_ref: float | None = None # the ladder reference (the last momentum buy's mid, or the reset level)
+        self.opt_cover_pending: tuple | None = None  # (top side, shares): the cover buy to send this pass
         self.opt_dir = 0
         self.opt_rise_armed: dict[str, bool] = {"UP": True, "DOWN": True}
         self.opt_n = 0
@@ -482,7 +532,7 @@ class RisingRecoveryEngine(BookMomentumEngine):
 
     def _resting_on(self, token: str) -> dict | None:
         for oid, o in self.resting.items():
-            if o["token"] == token:
+            if o["token"] == token and o.get("kind") != "opt_maker":   # a resting maker part never blocks the next decision
                 return {"id": oid, **o}
         if self._now < self.end_guard.get(token, -1e18):
             return {"id": None, "token": token, "state": "ended, a fill may still come"}
@@ -561,7 +611,9 @@ class RisingRecoveryEngine(BookMomentumEngine):
                 continue
             if sc.mode == "opt":
                 o = self._opt_pass(b, m, tops, now, left, balance)
-                if o is not None:
+                if isinstance(o, list):
+                    out.extend(o)                          # a mixed buy: the taker part and the maker part
+                elif o is not None:
                     out.append(o)
                 continue
             if b.worst >= sc.target_profit_usdc - 1e-9 and (b.U > 0 or b.D > 0):
@@ -1718,8 +1770,13 @@ class RisingRecoveryEngine(BookMomentumEngine):
         if mids["UP"] is not None and mids["DOWN"] is not None:
             # the momentum phase (the user 10-13): a token rising inside the zone is bought every opt_mom_interval_s;
             # the phase follows the token it started on until the target / a 2c reversal / leaving the zone
+            lower = "DOWN" if mids["UP"] >= mids["DOWN"] else "UP"
+            if sc.opt_mom_ladder_enabled:
+                lm_l = mids[b.opt_mom_side] if b.opt_in_mom and b.opt_mom_side else mids[lower]
+                if b.opt_mom_ladder_ref is None or not (sc.opt_mom_ladder_low - 1e-9 <= lm_l <= sc.opt_mom_ladder_high + 1e-9):
+                    b.opt_mom_ladder_ref = sc.opt_mom_ladder_reset       # out of the range: the ladder starts over
             cands = [b.opt_mom_side] if b.opt_in_mom and b.opt_mom_side else \
-                [s_ for s_ in ("UP", "DOWN") if sc.opt_mom_low - 1e-9 <= mids[s_] <= sc.opt_mom_high + 1e-9]
+                [s_ for s_ in (("UP", "DOWN") if not sc.opt_mom_lower_only else (lower,)) if sc.opt_mom_low - 1e-9 <= mids[s_] <= sc.opt_mom_high + 1e-9]
             info = {}
             for s_ in cands:
                 t3 = self._price_at(tops[s_][0], now - 3000.0, 1), self._price_at(tops[s_][0], now - 3000.0, 2)
@@ -1731,23 +1788,69 @@ class RisingRecoveryEngine(BookMomentumEngine):
                 if rising:
                     _, side = max(rising)
                     b.opt_in_mom, b.opt_mom_peak, b.opt_mom_side = True, mids[side], side
+                    b.opt_mom_ref = mids[side]
+                    b.opt_mom_check_t = b.opt_mom_check_px = None
                     self._opt_log(b, "momentum-start", "monitor", now, side=side, mid=round(mids[side], 4))
+                    if sc.opt_mom_buy_at_start and sc.opt_mom_shares > 0:
+                        events.append("momentum")          # the user 10-14: bought the moment it starts rising
             else:
                 side = b.opt_mom_side
                 lm = mids[side]
                 b.opt_mom_peak = max(b.opt_mom_peak or lm, lm)
-                why = None
+                why, cover = None, False
                 if lm >= sc.opt_mom_target - 1e-9:
                     why = f"target {sc.opt_mom_target:.2f} reached"
                 elif lm <= (b.opt_mom_peak or lm) - 0.02 + 1e-9:
-                    why = "the trend reversed"
+                    why, cover = "the trend reversed", True
                 elif lm < sc.opt_mom_low - 1e-9:
                     why = "left the zone"                  # above the zone the phase runs on until the target
+                elif b.opt_mom_check_t is not None and now >= b.opt_mom_check_t:
+                    # the 3-s check after a buy (the user 10-14): still rising -> wait; stalled or falling -> cover
+                    if lm >= (b.opt_mom_check_px or lm) + sc.opt_mom_check_min_rise - 1e-9:
+                        # still rising: wait -- and check again opt_mom_check_s later from here (a rise that then stalls
+                        # without a 2c reversal is covered too, not left open)
+                        self._opt_log(b, "momentum-check", "monitor", now, side=side, mid=round(lm, 4), result="still rising: wait")
+                        b.opt_mom_check_t, b.opt_mom_check_px = now + sc.opt_mom_check_s * 1000.0, lm
+                    else:
+                        why, cover = f"stalled at the {sc.opt_mom_check_s:g}-s check", True
                 if why:
-                    b.opt_in_mom, b.opt_mom_peak, b.opt_mom_side = False, None, None
-                    self._opt_log(b, "momentum-end", "monitor", now, side=side, mid=round(lm, 4), reason=why)
+                    if cover and sc.opt_mom_cover and b.opt_mom_last_qty > 0:
+                        b.opt_cover_pending = ("DOWN" if side == "UP" else "UP", round(b.opt_mom_last_qty * sc.opt_mom_cover_ratio, 2))
+                        events.append("mom_cover")
+                    b.opt_in_mom, b.opt_mom_peak, b.opt_mom_side, b.opt_mom_ref = False, None, None, None
+                    b.opt_mom_check_t = b.opt_mom_check_px = None
+                    self._opt_log(b, "momentum-end", "monitor", now, side=side, mid=round(lm, 4), reason=why, cover=cover)
+                elif sc.opt_mom_trigger == "step":
+                    # the user 10-14: a buy on every opt_mom_step (3c) rise of the mid from the last momentum buy; inside
+                    # the ladder range the reference is the ladder's (the last purchase, across rises), not the phase's
+                    base = b.opt_mom_ref if b.opt_mom_ref is not None else lm
+                    if sc.opt_mom_ladder_enabled and sc.opt_mom_ladder_low - 1e-9 <= lm <= sc.opt_mom_ladder_high + 1e-9 \
+                            and b.opt_mom_ladder_ref is not None:
+                        base = b.opt_mom_ladder_ref
+                    if lm >= base + sc.opt_mom_step - 1e-9:
+                        events.append("momentum")
                 elif now - b.opt_mom_last_t >= sc.opt_mom_interval_s * 1000.0:
                     events.append("momentum")
+        # --- the profit lock (the user, 10-14): the worst outcome at target_profit_usdc -> the market is done, no more buys
+        if (b.U > 0 or b.D > 0) and sc.target_profit_usdc > 0 and b.worst >= sc.target_profit_usdc - 1e-9:
+            self._done(b, f"locked: worst {b.worst:+.2f} >= {sc.target_profit_usdc:g}")
+            return None
+        # --- the pair buy (the user, 10-14): pairs under opt_pair_threshold come before every other rule
+        if not blocked and sc.opt_pair_enabled:
+            o = self._opt_pair(b, m, tops, now)
+            if o is not None:
+                return o
+        # --- the favourite fix (the user, 10-13: "if the price is in 0.6-0.8 and the settlement PnL of the leader is
+        # negative, buy leader tokens and make the settlement PnL +$5"); every pass, before anything else, the other
+        # (lower-priced token) rules untouched
+        if not blocked and sc.fix_high and (b.U > 0 or b.D > 0):
+            o = self._opt_fix(b, m, tops, mids, now, left)
+            if o is not None:
+                return o
+        if not blocked and sc.opt_hedge_enabled and (b.U > 0 or b.D > 0):
+            o = self._opt_hedge(b, m, tops, mids, now)
+            if o is not None:
+                return o
         if not events:
             return None
         b.opt_n += 1
@@ -1770,10 +1873,29 @@ class RisingRecoveryEngine(BookMomentumEngine):
                 b.fired.add("init")                        # fired only when an order actually goes out
                 return self._opt_send(b, m, tops, init_side, filled, eff, tag, "opt_init", now,
                                       r_2s_bps=(None if r2 is None else round(r2, 3)), init_try=b.opt_init_tries + 1)
+        # --- the cover (the user, 10-14): the lower token's rise stalled or reversed after a momentum buy -> the top-side
+        # token is bought in the same size (a pair with the lower token's shares), then the market is back to the rules
+        if "mom_cover" in events and b.opt_cover_pending is not None:
+            top, qty = b.opt_cover_pending
+            b.opt_cover_pending = None
+            filled, vwap, eff, why = self._opt_simulate(b, m, tops, top, qty)
+            if why:
+                self._opt_log(b, tag, "skip", now, reason=f"cover {top}: {why}")
+            elif self._resting_on(tops[top][0]) is not None:
+                self._opt_log(b, tag, "skip", now, reason="cover: an order on this token is still ending")
+            else:
+                return self._opt_send(b, m, tops, top, filled, eff, tag, "opt_cover", now, mid=round(mids[top], 4),
+                                      covers=qty, worst_now=round(min(b.U, b.D) - b.C, 4))
         # --- the momentum phase (the user, 10-13): the lower-priced token rising through 0.30..0.40 is bought every
         # opt_mom_interval_s in a fixed amount until the phase ends (target reached / trend reversed / left the zone)
         if "momentum" in events and sc.opt_mom_shares > 0 and b.opt_mom_side is not None:
             side = b.opt_mom_side
+            if (sc.opt_mom_ladder_enabled and sc.opt_mom_ladder_low - 1e-9 <= mids[side] <= sc.opt_mom_ladder_high + 1e-9
+                    and mids[side] < (b.opt_mom_ladder_ref if b.opt_mom_ladder_ref is not None else sc.opt_mom_ladder_reset) + sc.opt_mom_step - 1e-9):
+                self.rr_stats["opt_mom_ladder_wait"] += 1
+                self._opt_log(b, tag, "skip", now, reason=f"ladder: {side} mid {mids[side]:.3f} under the last purchase "
+                              f"{b.opt_mom_ladder_ref:.3f} + {sc.opt_mom_step:.2f}")
+                return None
             cap, why = self._opt_opposite_cap(b, side, now)
             qty = sc.opt_mom_shares if cap is None else min(sc.opt_mom_shares, cap)
             filled, vwap, eff, why2 = (0.0, None, None, None) if why else self._opt_simulate(b, m, tops, side, qty)
@@ -1783,7 +1905,13 @@ class RisingRecoveryEngine(BookMomentumEngine):
             elif self._resting_on(tops[side][0]) is not None:
                 self._opt_log(b, tag, "skip", now, reason="an order on this token is still ending")
             else:
+                b.opt_mom_ref = mids[side]                 # the next step is measured from this buy
+                if sc.opt_mom_ladder_low - 1e-9 <= mids[side] <= sc.opt_mom_ladder_high + 1e-9:
+                    b.opt_mom_ladder_ref = mids[side]      # ... and so is the ladder, across rises (inside its range only)
+                b.opt_mom_last_qty = filled
+                b.opt_mom_check_t, b.opt_mom_check_px = now + sc.opt_mom_check_s * 1000.0, mids[side]   # the 3-s check
                 return self._opt_send(b, m, tops, side, filled, eff, tag, "opt_mom", now, mid=round(mids[side], 4),
+                                      step_from=(None if b.opt_mom_ref is None else round(b.opt_mom_ref, 4)),
                                       worst_now=round(min(b.U, b.D) - b.C, 4))
             return None
         if b.opt_in_mom and sc.opt_mom_shares > 0:
@@ -1824,6 +1952,137 @@ class RisingRecoveryEngine(BookMomentumEngine):
         return self._opt_send(b, m, tops, best["side"], best["qty"], best["eff"], tag, "opt_buy", now,
                               worst_now=round(w0, 4), best_now=round(b0, 4), worst_after=round(best["w"], 4), best_after=round(best["b"], 4))
 
+    def _opt_pair(self, b, m, tops, now):
+        """OPT MODE, the pair buy (the user 10-14): the side holding unpaired lots is paired off with the other token when,
+        lot by lot (oldest first), lot unit + ask + fee <= opt_pair_threshold; the amount completes those pairs (cut to
+        the caps and the depth, bought again next pass while lots remain)."""
+        sc = self.scfg
+        ex_side, q_ex, _ = b.excess()
+        if ex_side is None:
+            return None
+        side = "DOWN" if ex_side == "UP" else "UP"
+        tok, ob = tops[side]
+        if ob is None or ob.best_ask is None or ob.best_bid is None:
+            return None
+        if self._resting_on(tok) is not None:
+            return None
+        ask = ob.best_ask
+        unit = ask + taker_fee(ask)
+        amount = 0.0
+        for lot in b.lots[ex_side]:
+            if lot.unit + unit <= sc.opt_pair_threshold + 1e-9:
+                amount += lot.shares
+            else:
+                break
+        room = min(sc.spot_max_shares - b.shares(side), (sc.spot_max_cost_usdc - b.C) / (unit + sc.spot_slippage_allowance))
+        n = math.floor(min(amount, room) * 100.0 + 1e-6) / 100.0
+        if n < VENUE_MIN - 1e-9:
+            return None
+        filled, vwap, eff, why = self._opt_simulate(b, m, tops, side, n)
+        if why:
+            if now - b.blocked_log_t >= 1000.0:
+                b.blocked_log_t = now
+                self._opt_log(b, "pair", "skip", now, reason=f"pair {side}: {why}", amount=amount)
+            return None
+        first = b.lots[ex_side][0].unit if b.lots[ex_side] else 0.0
+        log.info("[RTR_PAIR] %s %s ask %.2f + fee pairs the unpaired %s (from %.3f) at %.3f <= %.2f: buy %g of %g | %s", b.slug, side, ask,
+                 ex_side, first, first + unit, sc.opt_pair_threshold, filled, amount, b.line())
+        return self._opt_send(b, m, tops, side, filled, eff, "pair", "opt_pair", now, amount=amount, pair_cost=round(first + unit, 4),
+                              worst_now=round(b.worst, 4))
+
+    def _opt_hedge(self, b, m, tops, mids, now):
+        """OPT MODE, the cheap-token hedge (the user 10-14): the lower-priced token's ask at most hedge_max_price and the
+        worst outcome negative -> buy it up to the size that keeps the best outcome at opt_hedge_min_best_usdc, never past
+        the point where both outcomes are equal; priced with the fee and the slippage allowance, cut to the caps."""
+        sc = self.scfg
+        if mids["UP"] is None or mids["DOWN"] is None:
+            return None
+        lo = "DOWN" if mids["UP"] >= mids["DOWN"] else "UP"
+        tok, ob = tops[lo]
+        if ob is None or ob.best_ask is None or ob.best_bid is None or ob.best_ask > sc.hedge_max_price + 1e-9:
+            return None
+        pnl_lo, pnl_hi = b.shares(lo) - b.C, b.shares("UP" if lo == "DOWN" else "DOWN") - b.C
+        worst, best = min(pnl_lo, pnl_hi), max(pnl_lo, pnl_hi)
+        if worst >= 0.0 or pnl_lo >= pnl_hi or best <= sc.opt_hedge_min_best_usdc + 1e-9:
+            return None
+        if self._resting_on(tok) is not None or any(r["token"] == tok and r.get("kind") == "opt_maker" and r.get("state") != "cancelling"
+                                                    for r in self.resting.values()):
+            return None
+        ask = ob.best_ask
+        unit = ask + taker_fee(ask) + sc.spot_slippage_allowance
+        n = min((best - sc.opt_hedge_min_best_usdc) / unit, pnl_hi - pnl_lo)
+        room = min(sc.spot_max_shares - b.shares(lo), (sc.spot_max_cost_usdc - b.C) / unit)
+        n = math.floor(min(n, room) * 100.0 + 1e-6) / 100.0
+        if n < VENUE_MIN - 1e-9:
+            return None
+        filled, vwap, eff, why = self._opt_simulate(b, m, tops, lo, n)
+        if why:
+            if now - b.blocked_log_t >= 1000.0:
+                b.blocked_log_t = now
+                self._opt_log(b, "hedge", "skip", now, reason=f"hedge {lo}: {why}", worst=round(worst, 4), best=round(best, 4))
+            return None
+        w_after, b_after = worst + filled * (1.0 - eff), best - filled * eff
+        self.rr_stats["opt_hedge_orders"] += 1
+        log.info("[RTR_HEDGE] %s %s ask %.2f <= %.2f: worst %+.2f -> %+.2f, best %+.2f -> %+.2f (floor %+.2f) -> buy %g | %s", b.slug, lo,
+                 ask, sc.hedge_max_price, worst, w_after, best, b_after, sc.opt_hedge_min_best_usdc, filled, b.line())
+        return self._opt_send(b, m, tops, lo, filled, eff, "hedge", "opt_hedge", now, worst=round(worst, 4), worst_after=round(w_after, 4),
+                              best=round(best, 4), best_after=round(b_after, 4))
+
+    def _opt_fix(self, b, m, tops, mids, now, left=1e9):
+        """OPT MODE, the favourite fix: the higher-priced token's ask inside [fix_min_ask, fix_max_ask] and the P&L if
+        it wins under 0 -> buy the number of its shares that lifts that outcome to high_win_target_usdc (priced on the
+        ask with the fee and the slippage allowance; cut to the per-outcome share and per-market cost caps and to the
+        ask depth, so a cut fix is bought again on the next pass while the outcome stays negative)."""
+        sc = self.scfg
+        if mids["UP"] is None or mids["DOWN"] is None:
+            return None
+        hi = "UP" if mids["UP"] >= mids["DOWN"] else "DOWN"
+        tok, ob = tops[hi]
+        if ob is None or ob.best_ask is None or ob.best_bid is None:
+            return None
+        ask = ob.best_ask
+        if not (sc.fix_min_ask - 1e-9 <= ask <= sc.fix_max_ask + 1e-9):
+            return None
+        pnl_hi = b.shares(hi) - b.C
+        if pnl_hi >= 0.0:
+            return None
+        if left > sc.fix_max_left_s + 1e-9:
+            self.rr_stats["fix_too_early"] += 1             # the user 10-14: not before 210 s left
+            return None
+        if sc.fix_require_rising:
+            w = sc.fix_rise_window_s * 1000.0
+            tb, ta = self._price_at(tok, now - w, 1), self._price_at(tok, now - w, 2)
+            if tb is None or ta is None or mids[hi] - (tb + ta) / 2.0 < sc.fix_min_rise - 1e-12:
+                self.rr_stats["fix_not_rising"] += 1        # the user 10-14: only while the token is rising
+                return None
+        if self._resting_on(tok) is not None or any(r["token"] == tok and r.get("kind") == "opt_maker" and r.get("state") != "cancelling"
+                                                    for r in self.resting.values()):
+            return None                                     # a fix bid is already working on it
+        unit = ask + taker_fee(ask) + sc.spot_slippage_allowance
+        if unit >= 1.0 - 1e-9:
+            return None
+        need = math.ceil((sc.high_win_target_usdc - pnl_hi) / (1.0 - unit) * 100.0 - 1e-6) / 100.0
+        room = min(sc.spot_max_shares - b.shares(hi), (sc.spot_max_cost_usdc - b.C) / unit)
+        n = math.floor(min(need, room) * 100.0 + 1e-6) / 100.0
+        if n < VENUE_MIN - 1e-9:
+            if now - b.blocked_log_t >= 1000.0:
+                b.blocked_log_t = now
+                self._opt_log(b, "fix", "skip", now, reason=f"fix {hi}: {need:g} needed, {max(room, 0.0):.2f} fit the caps", pnl_hi=round(pnl_hi, 4))
+            return None
+        filled, vwap, eff, why = self._opt_simulate(b, m, tops, hi, n)
+        if why:
+            if now - b.blocked_log_t >= 1000.0:
+                b.blocked_log_t = now
+                self._opt_log(b, "fix", "skip", now, reason=f"fix {hi}: {why}", pnl_hi=round(pnl_hi, 4), wanted=n)
+            return None
+        after = b.shares(hi) + filled - (b.C + filled * eff)
+        self.rr_stats["opt_fix_orders"] += 1
+        log.info("[RTR_FIX] %s %s ask %.2f in %.2f..%.2f: if it wins %+.2f < 0 -> buy %g (%s%g needed) at <= %.2f -> %+.2f | %s",
+                 b.slug, hi, ask, sc.fix_min_ask, sc.fix_max_ask, pnl_hi, filled, "cut from " if filled < need - 1e-9 else "", need,
+                 round(min(0.99, ask + sc.max_slippage), 2), after, b.line())
+        return self._opt_send(b, m, tops, hi, filled, eff, "fix", "opt_fix", now, pnl_hi=round(pnl_hi, 4), needed=need,
+                              target=sc.high_win_target_usdc, pnl_hi_after=round(after, 4))
+
     def _opt_opposite_cap(self, b, side, now):
         """The user 10-13: the opposite token (the side held less than the other) is not bought within
         opt_opposite_delay_s of the market's first fill, and is held at most opt_opposite_ratio of the leader's
@@ -1846,15 +2105,58 @@ class RisingRecoveryEngine(BookMomentumEngine):
         return b.U * pu + b.D * (1.0 - pu) - b.C
 
     def _opt_send(self, b, m, tops, side, qty, eff, tag, kind, now, **extra):
+        """One opt buy: all of it taken (IOC at ask + max_slippage), or -- opt_maker_fraction > 0 and both parts at least
+        the venue minimum -- that fraction resting as a post-only bid (fee-free if filled) and the rest taken. A maker part
+        already resting on the token is replaced (cancelled next pass). Returns one (slug, side, order) or a list of two."""
+        sc = self.scfg
         tok, ob = tops[side]
-        limit = round(min(0.99, ob.best_ask + self.scfg.max_slippage), 2)
-        o = Order(token_id=tok, side=Side.BUY, price=limit, size=round(qty, 2), tif=TimeInForce.IOC, expected_price=ob.best_ask,
-                  tag=f"{side} rising_recovery opt {kind} {qty:g} <= {limit:.2f} ({tag})")
+        limit = round(min(0.99, ob.best_ask + sc.max_slippage), 2)
+        speed = self.speed(tok, now)
+        if sc.opt_exec_mode == "speed":
+            fast = speed is None or speed >= sc.opt_speed_threshold - 1e-12
+            q_t, q_m = (round(qty, 2), 0.0) if fast else (0.0, round(qty, 2))
+        elif sc.opt_exec_mode == "mixed":
+            q_m = math.floor(qty * sc.opt_maker_fraction * 100.0 + 1e-9) / 100.0 if sc.opt_maker_fraction > 0 else 0.0
+            q_t = round(qty - q_m, 2)
+            if q_m < VENUE_MIN - 1e-9 or q_t < VENUE_MIN - 1e-9:
+                q_m, q_t = 0.0, round(qty, 2)
+        else:
+            q_t, q_m = round(qty, 2), 0.0
         b.last_order_t = now
-        self._opt_log(b, tag, "order", now, side=side, qty=round(qty, 2), limit=limit, effective_price=round(eff, 4), **extra)
-        res = self._hold(o, b, side, tok, limit, qty, now, kind)
-        self.orders[o.order_id]["trigger"] = tag
-        return res
+        self._opt_log(b, tag, "order", now, side=side, qty=round(qty, 2), taker_qty=q_t, maker_qty=q_m, limit=limit,
+                      effective_price=round(eff, 4), speed=(None if speed is None else round(speed, 4)), **extra)
+        res = None
+        if q_t > 0.0:
+            o = Order(token_id=tok, side=Side.BUY, price=limit, size=q_t, tif=TimeInForce.IOC, expected_price=ob.best_ask,
+                      tag=f"{side} rising_recovery opt {kind} {q_t:g} <= {limit:.2f} ({tag})")
+            res = self._hold(o, b, side, tok, limit, q_t, now, kind)
+            self.orders[o.order_id]["trigger"] = tag
+        if q_m <= 0.0:
+            return res
+        for oid, r in self.resting.items():
+            if r["token"] == tok and r.get("kind") == "opt_maker":
+                r["replace"] = True                        # one maker part per token: the older one is pulled next pass
+        bid, ask = ob.best_bid, ob.best_ask
+        px = round(bid + (0.01 if ask - bid >= 0.02 - 1e-9 else 0.0), 2)
+        if px >= ask - 1e-9:
+            px = round(ask - 0.01, 2)
+        om = Order(token_id=tok, side=Side.BUY, price=px, size=q_m, tif=TimeInForce.GTC, expires_ts=m.close_ts, expected_price=px,
+                   post_only=True, tag=f"{side} rising_recovery opt {kind} maker part {q_m:g} @ {px:.2f} ({tag})")
+        res_m = self._hold(om, b, side, tok, px, q_m, now, "opt_maker")
+        self.orders[om.order_id]["trigger"] = tag
+        self.orders[om.order_id]["maker_of"] = kind
+        self.rr_stats["opt_maker_parts" if res is not None else "opt_maker_only"] += 1
+        return [res, res_m] if res is not None else [res_m]
+
+    def speed(self, token: str, now: float) -> float | None:
+        """|mid now - mid opt_speed_window_ms ago| from the book history, None without that much history."""
+        last = self.last_top.get(token)
+        if last is None or last[1] is None or last[2] is None:
+            return None
+        then_b, then_a = self._price_at(token, now - self.scfg.opt_speed_window_ms, 1), self._price_at(token, now - self.scfg.opt_speed_window_ms, 2)
+        if then_b is None or then_a is None:
+            return None
+        return abs((last[1] + last[2]) / 2.0 - (then_b + then_a) / 2.0)
 
     def _hold(self, o, b, side, tok, px, n, now, kind, avg=None, cap=None):
         # held at once (before on_pair_submit) so the budget and the one-order-per-token rule see it this tick
@@ -1875,6 +2177,18 @@ class RisingRecoveryEngine(BookMomentumEngine):
             if o.get("state") == "cancelling" or str(o.get("kind", "")).endswith("take"):
                 continue
             if str(o.get("kind", "")).startswith(("spot_", "opt_")):
+                if o["kind"] == "opt_maker":
+                    b_ = self.books.get(o["slug"])
+                    close_ = self._close_ts.get(o["slug"], b_.close_ts if b_ else None)
+                    left_ = (close_ - now) / 1000.0 if close_ is not None else 1e9
+                    why_m = ("replaced by a newer buy" if o.get("replace") else "rested too long" if now - o["t"] >= sc.opt_maker_rest_s * 1000.0
+                             else "too close to the close" if left_ < sc.pair_min_left_s else None)
+                    if why_m:
+                        o["state"], o["no_guard"] = "cancelling", True       # no end guard: the taker path stays open
+                        out.append(oid)
+                        self.rr_stats["cancel_opt_maker"] += 1
+                        log.info("[RTR_CANCEL] %s opt_maker %s bid %.2f x %g: %s", o["slug"], o["side"], o["price"], o["size"], why_m)
+                    continue
                 if o["kind"] == "spot_cover":
                     b_ = self.books.get(o["slug"])
                     close_ = self._close_ts.get(o["slug"], b_.close_ts if b_ else None)
@@ -1987,7 +2301,7 @@ class RisingRecoveryEngine(BookMomentumEngine):
         o = self.resting.pop(order_id, None)
         if o is not None and not filled and not o.get("no_guard"):
             self.end_guard[o["token"]] = self._now + self.scfg.end_guard_s * 1000.0
-        if o is not None and not filled and o.get("kind") == "opt_init":
+        if o is not None and not filled and (o.get("kind") == "opt_init" or self.orders.get(order_id, {}).get("maker_of") == "opt_init"):
             b = self.books.get(o["slug"])
             if b is not None and b.opt_init_filled <= 1e-9:
                 b.fired.discard("init")                   # nothing bought: the initial entry may be proposed again

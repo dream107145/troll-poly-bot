@@ -476,6 +476,73 @@ p { margin: 0; }
    the rows need more separation than neighbours on the same line do */
 .chips { display: flex; flex-wrap: wrap; gap: 10px 7px; }
 #market-picker { margin: 4px 0 12px; }
+.skip-tokens {
+  margin: -2px 0 14px; padding: 10px 12px;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--surface-1);
+}
+.skip-tokens[hidden] { display: none; }
+.skip-tokens-head {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px;
+  margin-bottom: 8px;
+}
+.skip-tokens-label {
+  font-size: 12px; font-weight: 600; letter-spacing: .02em;
+  text-transform: uppercase; color: var(--text-secondary);
+}
+.skip-tokens-hint { font-size: 12px; color: var(--text-muted); }
+.skip-chips { margin: 0; }
+.chip.skip-chip[data-skip="1"] {
+  background: color-mix(in srgb, var(--danger, #c44) 14%, var(--surface-2));
+  border-color: color-mix(in srgb, var(--danger, #c44) 55%, var(--border));
+  color: var(--text-primary); font-weight: 550;
+  text-decoration: line-through;
+  text-decoration-thickness: 1.5px;
+}
+.chip.skip-chip[data-skip="1"] .skip-tag {
+  font-size: 10px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
+  padding: 1px 5px; border-radius: 4px;
+  background: color-mix(in srgb, var(--danger, #c44) 22%, transparent);
+  text-decoration: none;
+}
+.chip.skip-chip.lower-side-chip[data-skip="1"] {
+  background: color-mix(in srgb, var(--accent, #3a7) 14%, var(--surface-2));
+  border-color: color-mix(in srgb, var(--accent, #3a7) 55%, var(--border));
+  text-decoration: none;
+}
+.chip.skip-chip.lower-side-chip[data-skip="1"] .skip-tag {
+  background: color-mix(in srgb, var(--accent, #3a7) 22%, transparent);
+}
+.skip-pairs-mode .switch {
+  margin: 6px 0 2px;
+}
+.skip-tokens-status {
+  margin: 8px 0 0; font-size: 12px; color: var(--text-muted); min-height: 1.2em;
+}
+.cheapside-average {
+  display: flex; align-items: baseline; gap: 10px; width: fit-content;
+  margin: -4px 0 12px; padding: 7px 11px;
+  border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-1);
+  font-variant-numeric: tabular-nums;
+}
+.cheapside-average[hidden] { display: none; }
+.cheapside-average-label { color: var(--text-secondary); font-size: 12px; }
+.cheapside-average strong { font-size: 16px; }
+.cheapside-average-note { color: var(--text-muted); font-size: 11px; }
+.cheapside-projection {
+  margin: 0 0 14px; padding: 12px; border: 1px solid var(--border);
+  border-radius: var(--radius-sm); background: var(--surface-1);
+  font-variant-numeric: tabular-nums;
+}
+.cheapside-projection[hidden] { display: none; }
+.cheapside-projection-head, .cheapside-projection-kpis { display: flex; flex-wrap: wrap; gap: 8px 20px; }
+.cheapside-projection-head { justify-content: space-between; color: var(--text-secondary); font-size: 12px; }
+.cheapside-projection-head span, .cheapside-projection-kpis small { color: var(--text-muted); font-size: 11px; }
+.cheapside-projection-kpis { margin-top: 10px; }
+.cheapside-projection-kpis > div { display: grid; gap: 2px; min-width: 145px; }
+.cheapside-projection-kpis > div > span { color: var(--text-secondary); font-size: 11px; }
+.cheapside-projection-kpis b { font-size: 16px; }
+.cheapside-projection-legs { display: flex; flex-wrap: wrap; gap: 5px 12px; margin-top: 10px; color: var(--text-muted); font-size: 11px; }
 
 .chip {
   display: inline-flex; align-items: center; gap: 7px;
@@ -939,6 +1006,31 @@ p { margin: 0; }
   box-shadow: 0 28px 72px -28px rgba(0, 0, 0, .55);
 }
 .trade-dialog::backdrop { background: rgba(11, 11, 11, .45); backdrop-filter: blur(2px); }
+.all-charts-dialog {
+  width: min(1800px, calc(100vw - 32px));
+  height: min(980px, calc(100vh - 32px));
+}
+.all-charts-dialog .td-inner { height: 100%; max-height: none; }
+.all-charts-summary {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px 14px;
+  padding: 10px 12px; margin: 0 0 4px;
+  border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-1);
+  font-variant-numeric: tabular-nums;
+}
+.all-charts-summary[hidden] { display: none; }
+.all-charts-summary-item { display: grid; gap: 2px; min-width: 0; }
+.all-charts-summary-item .kpi-label { color: var(--text-secondary); font-size: 11px; }
+.all-charts-summary-item .all-charts-summary-value { font-size: 16px; font-weight: 600; color: var(--text-primary); }
+.all-charts-summary-item .kpi-note { color: var(--text-muted); font-size: 11px; }
+@media (max-width: 900px) { .all-charts-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.all-charts-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+.all-chart-card { min-width: 0; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+.all-chart-card h4 { margin: 0 0 8px; font-size: 13px; }
+.all-chart-card .readout { margin: 0 0 4px; }
+.all-chart-card .chart-host { min-height: 180px; }
+.all-chart-card .legend { margin-top: 4px; }
+@media (max-width: 1100px) { .all-charts-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .all-charts-grid { grid-template-columns: minmax(0, 1fr); } }
 .td-inner {
   display: flex; flex-direction: column; gap: 10px;
   max-height: calc(100vh - 34px);
@@ -1163,3 +1255,11 @@ p { margin: 0; }
 .btn-buy { color: var(--pos, #1e8e3e); border-color: currentColor; background: transparent; font-weight: 600; }
 /* the Market page's Sell-all button sits between the Buy panel and the orders scope */
 #sell-all { margin-right: 10px; white-space: nowrap; }
+
+/* the Restart modal (the user, 2026-10-13): two choices, keep the data or start fresh */
+.restart-dialog { width: min(560px, calc(100vw - 32px)); }
+.restart-options { display: flex; flex-direction: column; gap: 10px; }
+.restart-option { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; text-align: left;
+  white-space: normal; padding: 12px 14px; height: auto; line-height: 1.4; }
+.restart-option span { font-size: 12px; color: var(--text-secondary, inherit); opacity: .85; }
+.restart-option[disabled] { opacity: .5; }

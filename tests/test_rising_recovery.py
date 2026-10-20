@@ -1244,6 +1244,15 @@ def test_low_rise_rule_buys_ten_of_the_lower_priced_token_on_a_book_rise():
 
 def _O(**kw):
     kw.setdefault("mode", "opt")
+    kw.setdefault("opt_hedge_enabled", False)                         # the 10-14 cheap hedge has its own test
+    kw.setdefault("opt_pair_enabled", False)                          # the 10-14 pair buy / lock have their own test
+    kw.setdefault("target_profit_usdc", 0.0)
+    kw.setdefault("opt_exec_mode", "taker")                           # the rule tests run all-taker; the mix / speed have their own tests
+    kw.setdefault("opt_mom_trigger", "timer")                         # the 10-13 timer rule; the 10-14 step rule has its own test
+    kw.setdefault("opt_mom_lower_only", False)                        # the 10-14 lower-token / start-buy / 3-s check / cover rule
+    kw.setdefault("opt_mom_buy_at_start", False)                      # has its own test below
+    kw.setdefault("opt_mom_cover", False)
+    kw.setdefault("opt_mom_ladder_enabled", False)                    # the 10-14 ladder has its own test
     return _S(strike=50.0, **kw)
 
 
@@ -1454,7 +1463,7 @@ def test_opt_momentum_phase_buys_the_lower_token_every_three_seconds_until_it_en
 def test_opt_strict_mode_never_pairs_the_rising_token_with_the_dear_one():
     # the user 10-13: "when it buys the rising token around 0.4, do not make a pair with the high-priced token;
     # buy the other token only if both settlement PnLs can be positive"
-    w = _O(opt_require_positive="both")
+    w = _O(opt_require_positive="both", fix_high=False)
     b = w.e._book(w.m)                                                # noqa: SLF001
     b.fired.add("init")
     b.add("UP", 10.0, 0.30, 0.10)                                     # the momentum buys: 10 UP for 3.10
@@ -1548,3 +1557,211 @@ def test_nothing_is_placed_while_risk_is_halted(monkeypatch, tmp_path):
     bot.risk.realised_today = 0.0
     bot._engine_pair_cancels(T0 + 1000)                               # noqa: SLF001
     assert bot.engine.risk_halted is False
+
+
+# ───────── OPT mode: the favourite fix (the user, 2026-10-13 21:xx) ─────────
+
+def test_opt_favourite_fix_lifts_the_dear_tokens_outcome_to_the_target_inside_the_band():
+    w = _O(fix_high=True, fix_min_ask=0.60, fix_max_ask=0.80, high_win_target_usdc=5.0, spot_max_shares=200.0, spot_max_cost_usdc=200.0,
+           fix_max_left_s=300.0, fix_require_rising=False, opt_hedge_enabled=False)
+    (_, _, o), = _btc_ramp(w, 0.25, [100000.0] * 8 + [100002.0, 100004.0, 100006.0, 100008.0])
+    w.fill(o, 3.5, price=0.55)                                        # UP 10 at 0.55: if UP wins +4.4 -> no fix
+    b = w.book
+    assert _btc_ramp(w, 5.0, [100008.0] * 3, up=(0.69, 0.70)) == []
+    b.add("DOWN", 10.0, 0.45, FeeSchedule().taker_fee_per_share(0.45) * 10)   # now if UP wins: 10 - C < 0
+    pnl_up = b.U - b.C
+    assert pnl_up < 0
+    assert _btc_ramp(w, 6.0, [100008.0] * 2, up=(0.84, 0.85)) == []    # above the band: no fix
+    out = _btc_ramp(w, 7.0, [100008.0] * 2, up=(0.69, 0.70))
+    (_, side, o2), = out
+    eff = 0.70 + FeeSchedule().taker_fee_per_share(0.70) + 0.01
+    assert side == "UP" and o2.size == pytest.approx((5.0 - pnl_up) / (1 - eff), abs=0.02) and o2.tif is TimeInForce.IOC
+    assert w.e.orders[o2.order_id]["kind"] == "opt_fix"
+    w.fill(o2, 7.6, price=0.70)
+    assert b.U - b.C >= 5.0 - 0.02                                    # the UP outcome reached the target (slippage allowance unspent)
+    assert _btc_ramp(w, 9.0, [100008.0] * 3, up=(0.69, 0.70)) == []    # positive: nothing more
+    # off, or out of the band, or capped: no fix
+    w2 = _O(fix_high=False)
+    (_, _, o), = _btc_ramp(w2, 0.25, [100000.0] * 8 + [100002.0, 100004.0, 100006.0, 100008.0])
+    w2.fill(o, 3.5, price=0.55)
+    w2.book.add("DOWN", 10.0, 0.45, 0.2)
+    assert _btc_ramp(w2, 7.0, [100008.0] * 2, up=(0.69, 0.70)) == []
+
+
+# ───────── OPT mode: the maker / taker mix (the user, 2026-10-14) ─────────
+
+def test_opt_buys_split_into_a_taker_part_and_a_resting_maker_part_that_never_blocks():
+    w = _O(opt_exec_mode="mixed", opt_maker_fraction=0.5, opt_maker_rest_s=10.0, fix_high=False)
+    out = _btc_ramp(w, 0.25, [100000.0] * 8 + [100002.0, 100004.0, 100006.0, 100008.0])
+    assert len(out) == 2
+    (_, s1, taker), (_, s2, maker) = out
+    assert s1 == s2 == "UP" and taker.tif is TimeInForce.IOC and taker.size == 5.0
+    assert maker.tif is TimeInForce.GTC and maker.post_only and maker.size == 5.0 and maker.price == pytest.approx(0.55)   # bid, 1c spread
+    assert w.e.orders[maker.order_id]["kind"] == "opt_maker" and w.e.orders[maker.order_id]["maker_of"] == "opt_init"
+    w.fill(taker, 3.5, price=0.56)
+    b = w.book
+    assert b.U == 5.0 and w.e._resting_on("UP") is None              # the maker part does not hold the token  # noqa: SLF001
+    # the maker part fills fee-free at its price
+    w.e.on_pair_done(maker.order_id, filled=True)
+    w.e.on_pair_fill_record(w.slug, maker, SimpleNamespace(size=5.0, price=0.55, fee=0.0, token_id="UP"), T0 + 5_000)
+    assert b.U == 10.0 and b.fees == pytest.approx(FeeSchedule().taker_fee_per_share(0.56) * 5)
+    # a maker part rests at most opt_maker_rest_s, without an end guard afterwards
+    w2 = _O(opt_exec_mode="mixed", opt_maker_fraction=0.5, opt_maker_rest_s=10.0, fix_high=False)
+    (_, _, t2), (_, _, m2) = _btc_ramp(w2, 0.25, [100000.0] * 8 + [100002.0, 100004.0, 100006.0, 100008.0])
+    w2.fill(t2, 3.5, price=0.56)
+    assert w2.e.pair_cancels(T0 + 8_000.0) == []
+    assert w2.e.pair_cancels(T0 + 13_000.0) == [m2.order_id]
+    w2.e.on_pair_done(m2.order_id, filled=False)
+    assert w2.e._resting_on("UP") is None                             # noqa: SLF001
+
+
+# ───────── OPT mode: momentum buys on every 3c step (the user, 2026-10-14) ─────────
+
+def test_opt_momentum_phase_buys_on_every_three_cent_rise_not_on_a_timer():
+    w = _O(opt_mom_low=0.35, opt_mom_high=0.80, opt_mom_target=0.80, opt_mom_shares=5.0, opt_mom_trigger="step", opt_mom_step=0.03,
+           fix_high=False)
+    b = w.e._book(w.m)                                                # noqa: SLF001
+    b.fired.add("init")
+    sent = _ramp_steps(w, 5.0, [round(0.50 + 0.005 * i, 3) for i in range(40)], "UP", dt=0.25)   # 0.50 -> 0.695 in 10 s
+    mom = [x for x in sent if x[2] == pytest.approx(5.0) and x[1] == "UP"]
+    assert len(mom) >= 3 and b.opt_in_mom and b.opt_mom_side == "UP"
+    gaps = [t2 - t1 for (t1, _, _), (t2, _, _) in zip(mom, mom[1:])]
+    assert min(gaps) < 5.0                                            # faster than the old timer ...
+    assert all(abs(g - 1.5) < 0.3 for g in gaps), gaps                # ... one buy per 3c (0.5c every 0.25 s = 1.5 s a step)
+    assert b.opt_mom_ref is not None and b.opt_mom_ref >= 0.59
+    # a flat mid buys nothing however long it sits there
+    n = len(sent)
+    _ramp_steps(w, 13.0, [b.opt_mom_ref] * 24, "UP", dt=0.5, sent=sent)
+    assert len([x for x in sent[n:] if x[2] == 5.0 and x[1] == "UP"]) == 0
+
+
+# ───────── OPT mode: taker when the token moves fast, maker when it is quiet (the user, 2026-10-14) ─────────
+
+def test_opt_speed_mode_takes_in_a_fast_market_and_rests_a_bid_in_a_quiet_one():
+    # quiet: the books are flat for the 2 s before the initial entry -> the whole buy rests as a post-only bid
+    w = _O(opt_exec_mode="speed", opt_speed_threshold=0.02, opt_maker_rest_s=10.0, fix_high=False)
+    out = _btc_ramp(w, 0.25, [100000.0] * 8 + [100002.0, 100004.0, 100006.0, 100008.0])
+    (_, side, o), = out
+    assert side == "UP" and o.tif is TimeInForce.GTC and o.post_only and o.size == 10.0 and o.price == pytest.approx(0.55)
+    assert w.e.orders[o.order_id]["maker_of"] == "opt_init" and "init" in w.book.fired
+    # pulled unfilled after the rest: the initial entry is proposed again
+    assert w.e.pair_cancels(T0 + 14_000.0) == [o.order_id]
+    w.e.on_pair_done(o.order_id, filled=False)
+    assert "init" not in w.book.fired and w.book.opt_init_tries == 1
+    # fast: the UP mid jumped 3c inside the last second -> the whole buy is taken
+    w2 = _O(opt_exec_mode="speed", opt_speed_threshold=0.02, fix_high=False)
+    _btc_ramp(w2, 0.25, [100000.0] * 8, up=(0.55, 0.56))
+    out = _btc_ramp(w2, 2.25, [100002.0, 100004.0, 100006.0, 100008.0], up=(0.58, 0.59))
+    (_, side, o), = out
+    assert side == "UP" and o.tif is TimeInForce.IOC and o.size == 10.0
+
+
+# ───────── OPT mode: the 10-14 gates on the fix, and the cheap hedge ─────────
+
+def test_opt_fix_waits_for_210_s_left_and_a_rising_favourite_and_the_hedge_keeps_the_best_case():
+    w = _O(fix_high=True, high_win_target_usdc=5.0, spot_max_shares=300.0, spot_max_cost_usdc=300.0, opt_hedge_enabled=True)
+    (_, _, o), = _btc_ramp(w, 0.25, [100000.0] * 8 + [100002.0, 100004.0, 100006.0, 100008.0])
+    w.fill(o, 3.5, price=0.55)
+    b = w.book
+    b.add("DOWN", 10.0, 0.45, FeeSchedule().taker_fee_per_share(0.45) * 10)   # if UP wins: negative
+    assert _btc_ramp(w, 7.0, [100008.0] * 2, up=(0.69, 0.70)) == [] and w.e.rr_stats["fix_too_early"] >= 1   # 293 s left
+    assert _btc_ramp(w, 92.0, [100008.0] * 8, up=(0.69, 0.70)) == [] and w.e.rr_stats["fix_not_rising"] >= 1   # <= 210 s but flat
+    out = _btc_ramp(w, 95.0, [100008.0] * 2, up=(0.72, 0.73))        # +3c over the last 5 s: rising
+    (_, side, o2), = out
+    assert side == "UP" and w.e.orders[o2.order_id]["kind"] == "opt_fix"
+    w.fill(o2, 95.6, price=0.73)
+    # the cheap hedge: UP 10 at 0.55 only, DOWN ask 0.15 -> buy DOWN until the UP outcome is at +2 (never past equal)
+    w2 = _O(fix_high=False, opt_hedge_enabled=True, hedge_max_price=0.20, opt_hedge_min_best_usdc=2.0, spot_max_shares=300.0)
+    (_, _, o), = _btc_ramp(w2, 0.25, [100000.0] * 8 + [100002.0, 100004.0, 100006.0, 100008.0])
+    w2.fill(o, 3.5, price=0.55)
+    b2 = w2.book
+    best, worst = b2.U - b2.C, b2.D - b2.C
+    assert _btc_ramp(w2, 5.0, [100008.0] * 2, up=(0.69, 0.70)) == []                   # DOWN ask 0.31: not cheap
+    out = _btc_ramp(w2, 6.0, [100008.0] * 2, up=(0.84, 0.85), dn=(0.14, 0.15))
+    (_, side, oh), = out
+    eff = 0.15 + FeeSchedule().taker_fee_per_share(0.15) + 0.01
+    assert side == "DOWN" and w2.e.orders[oh.order_id]["kind"] == "opt_hedge" and oh.size == pytest.approx(min((best - 2.0) / eff, best - worst), abs=0.011)
+    w2.fill(oh, 6.6, price=0.15)
+    assert b2.U - b2.C >= 2.0 - 0.02 and b2.D - b2.C > worst
+    assert _btc_ramp(w2, 8.0, [100008.0] * 2, up=(0.84, 0.85), dn=(0.14, 0.15)) == []   # the best case is at the floor: nothing more
+
+
+# ───────── OPT mode: the lower token bought as it starts rising; 3-s check; cover with the top side (the user, 2026-10-14) ─────────
+
+def test_opt_lower_token_is_bought_at_once_then_checked_after_3_s_and_covered_when_it_stalls():
+    w = _O(opt_mom_low=0.15, opt_mom_high=0.80, opt_mom_target=0.80, opt_mom_shares=5.0, opt_mom_trigger="step", opt_mom_step=0.03,
+           opt_mom_lower_only=True, opt_mom_buy_at_start=True, opt_mom_check_s=3.0, opt_mom_cover=True, opt_mom_cover_ratio=1.0,
+           fix_high=False, opt_opposite_delay_s=0.0, opt_opposite_ratio=10.0, opt_min_improvement=100.0)   # the optimizer stays quiet
+    b = w.e._book(w.m)                                                # noqa: SLF001
+    b.fired.add("init")
+    b.add("UP", 10.0, 0.70, 0.1)                                      # the top side is held; DOWN is the lower token at ~0.29
+    # DOWN starts rising: bought at once (5 sh), not after the first 3c step   (5.0 .. 8.5 s)
+    sent = _ramp_steps(w, 5.0, [0.29, 0.29, 0.29, 0.29, 0.30, 0.31, 0.32, 0.33], "DOWN", dt=0.5)
+    first = [x for x in sent if x[1] == "DOWN"]
+    assert first and first[0][2] == pytest.approx(5.0) and b.opt_in_mom and b.opt_mom_side == "DOWN"
+    assert b.opt_mom_check_t is not None
+    # it keeps rising: the 3-s checks pass (wait, no cover) and the 3c step buys again   (9.0 .. 12.0 s)
+    sent2 = _ramp_steps(w, 9.0, [0.335, 0.34, 0.345, 0.35, 0.355, 0.36, 0.365], "DOWN", dt=0.5)
+    assert all(x[1] == "DOWN" for x in sent2) and b.opt_in_mom and w.e.rr_stats.get("opt_cover_orders", 0) == 0
+    assert len([x for x in sent2 if x[1] == "DOWN"]) >= 1
+    # now it stalls: no further rise within 3 s of the last check -> the top-side token (UP) is bought in the same size
+    # as the last momentum buy and the phase ends   (12.5 .. 17.0 s)
+    last_qty = [x for x in sent + sent2 if x[1] == "DOWN"][-1][2]
+    sent3 = _ramp_steps(w, 12.5, [0.365] * 10, "DOWN", dt=0.5)
+    cov = [x for x in sent3 if x[1] == "UP"]
+    assert len(cov) == 1 and cov[0][2] == pytest.approx(last_qty) and not b.opt_in_mom
+    assert len([x for x in sent3 if x[1] == "DOWN"]) == 0
+    assert w.e.rr_stats["opt_cover_orders"] == 1 and any(o["kind"] == "opt_cover" for o in w.e.orders.values())
+    # the higher-priced token rising inside the zone is NOT a momentum candidate (lower only)
+    w2 = _O(opt_mom_low=0.15, opt_mom_high=0.80, opt_mom_lower_only=True, opt_mom_buy_at_start=True, opt_mom_shares=5.0, fix_high=False)
+    b2 = w2.e._book(w2.m)                                             # noqa: SLF001
+    b2.fired.add("init")
+    _ramp_steps(w2, 5.0, [0.55, 0.55, 0.55, 0.55, 0.56, 0.57, 0.58, 0.59], "UP", dt=0.5)
+    assert not b2.opt_in_mom
+
+
+# ───────── OPT mode: the pair buy and the profit lock (the user, 2026-10-14) ─────────
+
+def test_opt_pair_buy_completes_pairs_under_0_95_and_the_lock_ends_the_market():
+    w = _O(opt_pair_enabled=True, opt_pair_threshold=0.95, target_profit_usdc=5.0, fix_high=False, opt_min_improvement=100.0,
+           spot_max_shares=300.0, spot_max_cost_usdc=300.0)
+    (_, _, o), = _btc_ramp(w, 0.25, [100000.0] * 8 + [100002.0, 100004.0, 100006.0, 100008.0])
+    w.fill(o, 3.5, price=0.60)                                        # UP 10 at 0.60 (unit 0.6168), unpaired
+    b = w.book
+    assert _btc_ramp(w, 5.0, [100008.0] * 2, up=(0.64, 0.66)) == []  # DOWN ask 0.36: pair 0.99 > 0.95
+    out = _btc_ramp(w, 6.0, [100008.0] * 2, up=(0.70, 0.72))         # DOWN ask 0.30: 0.6168 + 0.3147 = 0.9315 <= 0.95
+    (_, side, op), = out
+    assert side == "DOWN" and op.size == pytest.approx(10.0) and w.e.orders[op.order_id]["kind"] == "opt_pair"
+    w.fill(op, 6.6, price=0.30)
+    assert b.excess()[0] is None and b.locked_pairs == 10.0 and b.worst == pytest.approx(10 - b.C)
+    assert _btc_ramp(w, 8.0, [100008.0] * 2, up=(0.70, 0.72)) == []   # nothing left to pair
+    # the lock: once the worst outcome is at +5 the market is done
+    b.add("UP", 20.0, 0.10, 0.0)
+    b.add("DOWN", 20.0, 0.10, 0.0)                                    # 30 / 30, C ~13.3: worst +16.7
+    assert _btc_ramp(w, 10.0, [100008.0] * 3, up=(0.40, 0.42)) == [] and b.phase == "done" and "locked" in b.why_done
+
+
+# ───────── OPT mode: the momentum ladder in 0.40..0.60 (the user, 2026-10-14) ─────────
+
+def test_opt_momentum_ladder_needs_3c_over_the_last_purchase_inside_the_range_and_resets_outside():
+    w = _O(opt_mom_low=0.15, opt_mom_high=0.80, opt_mom_target=0.80, opt_mom_shares=5.0, opt_mom_trigger="step", opt_mom_step=0.03,
+           opt_mom_lower_only=True, opt_mom_buy_at_start=True, opt_mom_cover=False, opt_mom_ladder_enabled=True,
+           opt_mom_ladder_low=0.40, opt_mom_ladder_high=0.60, opt_mom_ladder_reset=0.35,
+           fix_high=False, opt_opposite_delay_s=0.0, opt_opposite_ratio=10.0, opt_min_improvement=100.0)
+    b = w.e._book(w.m)                                                # noqa: SLF001
+    b.fired.add("init")
+    b.add("UP", 10.0, 0.60, 0.1)
+    # DOWN rises inside the range: the start buy at 0.42 is allowed (0.42 >= 0.35 + 0.03) and sets the reference
+    sent = _ramp_steps(w, 5.0, [0.40, 0.40, 0.40, 0.40, 0.41, 0.42, 0.43, 0.44], "DOWN", dt=0.5)
+    buys = [x for x in sent if x[1] == "DOWN"]
+    assert len(buys) == 1 and b.opt_mom_ladder_ref is not None and 0.41 <= b.opt_mom_ladder_ref <= 0.44
+    ref = b.opt_mom_ladder_ref
+    # it dips 2c (the phase ends) and rises again to 1c under reference + 3c: no new buy; at reference + 3c: a buy
+    sent2 = _ramp_steps(w, 9.0, [round(ref - 0.02, 3), round(ref - 0.02, 3), round(ref - 0.02, 3), round(ref - 0.02, 3),
+                                 round(ref - 0.01, 3), round(ref, 3), round(ref + 0.01, 3), round(ref + 0.02, 3)], "DOWN", dt=0.5)
+    assert [x for x in sent2 if x[1] == "DOWN"] == [] and w.e.rr_stats["opt_mom_ladder_wait"] >= 1
+    sent3 = _ramp_steps(w, 13.0, [round(ref + 0.03, 3), round(ref + 0.035, 3)], "DOWN", dt=0.5)
+    assert len([x for x in sent3 if x[1] == "DOWN"]) == 1 and b.opt_mom_ladder_ref >= ref + 0.03 - 1e-9
+    # out of the range the reference resets to 0.35
+    _ramp_steps(w, 14.0, [0.65, 0.65], "DOWN", dt=0.5)
+    assert b.opt_mom_ladder_ref == pytest.approx(0.35)

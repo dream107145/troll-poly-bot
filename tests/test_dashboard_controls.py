@@ -73,6 +73,16 @@ def test_choices_and_lists_are_normalised_and_nonsense_refused():
     clean, errors = validate({"spot_lag.order_type": "GTC", "spot_lag.exclude_assets": "BTC; rm -rf",
                               "spot_lag.assets": 5})
     assert clean == {} and len(errors) == 3
+    clean, errors = validate({"cmc.exclude_assets": " hype ", "cma.exclude_assets": "doge,bnb"})
+    assert clean == {"cmc.exclude_assets": "HYPE", "cma.exclude_assets": "DOGE,BNB"} and not errors
+    clean, errors = validate({"cmc.lower_side_only_assets": " hype, doge "})
+    assert clean == {"cmc.lower_side_only_assets": "HYPE,DOGE"} and not errors
+    clean, errors = validate({"cmc.lower_side_only_assets": "none"})
+    assert clean == {"cmc.lower_side_only_assets": ""} and not errors
+    clean, errors = validate({"cmc.skip_pairs_mode_enabled": True, "cmc.wipe_skip_threshold": 0.55})
+    assert clean == {"cmc.skip_pairs_mode_enabled": True, "cmc.wipe_skip_threshold": 0.55} and not errors
+    clean, errors = validate({"cmc.skip_pairs_mode_enabled": "off"})
+    assert clean == {"cmc.skip_pairs_mode_enabled": False} and not errors
 
 
 def test_contradictory_spot_lag_settings_are_reported():
@@ -198,3 +208,69 @@ def test_the_dashboard_payload_carries_the_new_kinds(tmp_path, monkeypatch):
     assert [r["group"] for r in payload["spec"]][0] == "Spot-lag signal"
     res = server.CONTROLS.replace_scope("live", {"spot_lag.order_type": "fak", "micro.max_order_usdc": 7})
     assert res["ok"] and res["values"] == {"spot_lag.order_type": "FAK", "micro.max_order_usdc": 7.0}
+
+
+# ───────── lp.* and rtr.* (2026-10-13): each paper bot's own parameters, reaching only its own engine ─────────
+
+def test_leader_pair_and_rising_recovery_rows_reach_only_their_own_bot():
+    from troll_poly_bot.strategy.leader_pair import LeaderPairConfig
+    from troll_poly_bot.strategy.rising_recovery import RisingRecoveryConfig
+    cfg = BotConfig()
+    lp, rtr = LeaderPairConfig(enabled=True), RisingRecoveryConfig(enabled=True)
+    lp_keys = {k for k, t in TUNABLES.items() if t.target == "lp"}
+    rtr_keys = {k for k, t in TUNABLES.items() if t.target == "rtr"}
+    assert len(lp_keys) >= 35 and len(rtr_keys) >= 30
+    for k in lp_keys:
+        assert hasattr(lp, TUNABLES[k].attr), k
+    for k in rtr_keys:
+        assert hasattr(rtr, TUNABLES[k].attr), k
+    # a leader_pair bot reports lp.* only; a rising_recovery bot rtr.* only; a plain bot neither
+    assert set(current_values(cfg, None, lp=lp)) & (lp_keys | rtr_keys) == lp_keys
+    assert set(current_values(cfg, None, rtr=rtr)) & (lp_keys | rtr_keys) == rtr_keys
+    assert not (set(current_values(cfg, None)) & (lp_keys | rtr_keys))
+    # a change applies to the running config object (the one the engine's markets read) and is reported
+    changed = apply_to({"lp.accum_shares": 10, "lp.accum_eval": "any_tick", "lp.max_settlement_loss_usdc": 12.5,
+                        "rtr.opt_quantities": "5,10", "rtr.mode": "spot"}, cfg, None, lp=lp, rtr=rtr)
+    assert len(changed) == 5 and lp.accum_shares == 10.0 and lp.accum_eval == "any_tick" and lp.max_settlement_loss_usdc == 12.5
+    assert rtr.opt_quantities == "5,10" and rtr.mode == "spot"
+    # the other bot never sees the first bot's rows
+    assert apply_to({"lp.accum_shares": 20}, cfg, None, rtr=rtr) == [] and lp.accum_shares == 10.0
+    # validation: the venue minimum and the choices hold
+    clean, errors = validate({"lp.accum_shares": 2, "lp.leader_rule": "last", "rtr.opt_require_positive": "both"})
+    assert clean["lp.accum_shares"] == 5.0 and clean["rtr.opt_require_positive"] == "both" and any("lp.leader_rule" in e for e in errors)
+    clean, errors = validate({"lp.exec_mode": "mixed", "lp.max_market_capital_usdc": 5000})
+    assert TUNABLES["lp.exec_mode"].options == ("taker",)
+    assert clean["lp.max_market_capital_usdc"] == 150.0
+    assert any("lp.exec_mode" in e for e in errors)
+    groups = [row["group"] for row in spec()]
+    assert groups.index("Spot-lag budget") < groups.index("Leader-pair rule 1") < groups.index("Rising-recovery mode") < groups.index("Pair-lock open rule")
+
+
+# ───────── cma.* (cross_market_arb): maker + risk knobs on the Variables page ─────────
+
+def test_cross_market_arb_rows_reach_only_that_bot():
+    from troll_poly_bot.strategy.cross_market_arb import CrossMarketArbConfig
+    cfg = BotConfig()
+    cma = CrossMarketArbConfig(enabled=True)
+    cma_keys = {k for k, t in TUNABLES.items() if t.target == "cma"}
+    assert len(cma_keys) >= 25
+    for k in cma_keys:
+        assert hasattr(cma, TUNABLES[k].attr), k
+    assert set(current_values(cfg, None, cma=cma)) & cma_keys == cma_keys
+    assert not (set(current_values(cfg, None)) & cma_keys)
+    changed = apply_to({
+        "cma.maximum_maker_sum": 0.96,
+        "cma.entry_mode": "both",
+        "cma.maker_shares": 10,
+        "cma.min_time_remaining_s": 90,
+    }, cfg, None, cma=cma)
+    assert len(changed) == 4
+    assert cma.maximum_maker_sum == 0.96 and cma.entry_mode == "both"
+    assert cma.maker_shares == 10.0 and cma.min_time_remaining_s == 90.0
+    assert apply_to({"cma.maximum_maker_sum": 0.90}, cfg, None) == []
+    assert cma.maximum_maker_sum == 0.96
+    clean, errors = validate({"cma.entry_mode": "auction", "cma.maker_shares": 2})
+    assert clean["cma.maker_shares"] == 5.0
+    assert any("cma.entry_mode" in e for e in errors)
+    groups = [row["group"] for row in spec()]
+    assert "Cross-market arb" in groups and "Cross-market arb gates" in groups

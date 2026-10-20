@@ -25,7 +25,7 @@ from troll_poly_bot.strategy import cheapside as cs
 from troll_poly_bot.strategy.cheapside import (
     FEATURES, CheapSideConfig, CheapSideEngine, CheapSideModel, cheap_side, features_for, supported,
 )
-from troll_poly_bot.strategy.engine import EngineConfig, Reason
+from troll_poly_bot.strategy.engine import EngineConfig, Evaluation, Reason
 from troll_poly_bot.strategy.spot_lag import SpotLagConfig
 from troll_poly_bot.types import BookLevel, OrderBook, TimeInForce
 
@@ -192,7 +192,7 @@ def test_a_supported_underpriced_cheap_side_becomes_a_fok_at_ask_plus_1c(monkeyp
     assert f["p_model"] == pytest.approx(round(p, 4))
     assert ev.net_edge == pytest.approx(p - 0.31 - FEE.taker_fee_per_share(0.31) - 0.005, abs=1e-6)
     order = w.e.to_order(ev, now)
-    assert order.tif is TimeInForce.FOK and order.price == pytest.approx(0.31) and order.size == 10.0
+    assert order.tif is TimeInForce.IOC and order.price == pytest.approx(0.31) and order.size == 10.0
     assert "cheapside" in order.tag
 
 
@@ -295,8 +295,10 @@ def test_the_live_bot_runs_it_under_its_own_name_and_budget(tmp_path, model_path
                   trade_log=str(tmp_path / "live_trades.cs.jsonl"), earnings_path=str(tmp_path / "e.jsonl"),
                   kill_file=str(tmp_path / "KILL"))
     assert type(bot.engine) is CheapSideEngine and bot.engine.scfg is cfg.cheapside
-    assert bot.risk.cfg.max_concurrent_positions == 4 and bot.risk.cfg.max_position_usdc <= 5.0
-    assert bot.risk.cfg.max_total_exposure_usdc <= 20.0
+    assert bot.risk.cfg.max_concurrent_positions == cfg.cheapside.max_simultaneous_positions
+    assert bot.risk.cfg.max_position_usdc <= 5.0
+    # Basket-capable Cheapside disables the generic total-exposure ceiling; paper cash binds.
+    assert bot.risk.cfg.max_total_exposure_usdc >= cfg.cheapside.max_total_exposure_usdc
     snap = bot.engine.snapshot()
     assert snap["strategy"] == "cheapside" and snap["cheapside_model"]["path"] == model_path
     assert cfg.spot_lag.enabled is False                          # spot-lag's own flag and config untouched
@@ -319,7 +321,113 @@ def test_the_dashboard_cannot_lift_its_budget(tmp_path, model_path):
 
 
 def test_the_order_type_is_honoured_fak_is_fill_and_kill(monkeypatch):
-    """2026-10-07: to_order ignored TPB_CHEAPSIDE_ORDER_TYPE and sent FOK; the paper app now runs FAK (IOC)."""
+    """Cheapside always submits FAK (IOC) so thin cheap books can partial-fill."""
     import inspect
     src = inspect.getsource(CheapSideEngine.to_order)
-    assert "self._fak" in src and "TimeInForce.IOC" in src
+    assert "TimeInForce.IOC" in src and "FOK" not in src.split("return Order")[-1]
+
+
+def test_basket_pre_send_does_not_depend_on_spot_tick(tmp_path, model_path):
+    cfg = BotConfig()
+    cfg.engine.strategy = "cheapside"
+    cfg.execution_scenario = "venue_lag"
+    cfg.deploy_mode = "paper"
+    cfg.cheapside = _cfg(model_path, portfolio_basket_enabled=True)
+    bot = LiveBot(assets=("BTC",), balance=50.0, cfg=cfg,
+                  state_path=str(tmp_path / "state.json"), trade_log=str(tmp_path / "trades.jsonl"),
+                  earnings_path=str(tmp_path / "earnings.jsonl"), kill_file=str(tmp_path / "KILL"))
+    meta = _World.__new__(_World).meta("BTC")
+    from troll_poly_bot.live import LiveMarket
+    from troll_poly_bot.strategy.engine import Evaluation
+    ev = Evaluation(slug=meta.market.slug, asset="BTC", seconds_left=100.0, reason=None,
+                    side="UP", token_id=meta.market.yes_token_id, limit_price=0.21,
+                    expected_price=0.20, size=5.0,
+                    features={"cheapside": {"basket_entry": True, "basket_low_buy": True}})
+    failed, checks = bot._confirm_entry(ev, LiveMarket(meta=meta), T0 + 200_000.0, None, 20.0)
+    assert failed is None, checks
+    assert checks["SPOT_FRESH"] is None
+
+
+def test_basket_leader_need_recovers_all_six_cheap_worst_case_costs(monkeypatch, model_path):
+    w = _World(monkeypatch, model_path, portfolio_basket_enabled=True,
+               portfolio_basket_min_leader_ask=0.55, portfolio_basket_max_leader_ask=0.78,
+               portfolio_basket_abort_leader_ask=0.82,
+               portfolio_basket_target_pnl_usdc=0.10)
+    leader_meta = w.meta("XRP")
+    leader_book = _book(leader_meta.market.yes_token_id, 0.68, 0.70)
+    w.e.market_quotes[leader_meta.market.slug] = {
+        "t": T0 + 100_000, "meta": leader_meta, "up": leader_book,
+        "down": _book(leader_meta.market.no_token_id, 0.28, 0.30), "valid": True,
+    }
+    cheap_legs = []
+    for asset in ("BTC", "ETH", "SOL", "DOGE", "BNB", "HYPE"):
+        meta = w.meta(asset)
+        cheap_legs.append({"slug": meta.market.slug, "leader": "UP", "side": "DOWN", "asset": asset})
+        w.e.inventory[meta.market.slug] = {
+            "DOWN": {"shares": 5.0, "cost": 1.0}, "UP": {"shares": 0.0, "cost": 0.0}}
+    plan = {"cheap": cheap_legs,
+            "leader": {"slug": leader_meta.market.slug, "side": "UP", "leader": "UP"}}
+    need, leaders_win, pnl_after, why = w.e._basket_leader_need(plan, T0 + 100_000)
+    assert need > 5.0
+    assert pnl_after >= 0.10 - 1e-6
+    assert "worst-case" in why
+    assert leaders_win < 0.0  # before sizing, six cheap costs dominate
+
+
+def test_basket_leader_revalidate_enforces_abort_band(monkeypatch, model_path):
+    w = _World(monkeypatch, model_path, portfolio_basket_enabled=True,
+               portfolio_basket_min_leader_ask=0.55, portfolio_basket_abort_leader_ask=0.82)
+    ev = SimpleNamespace(features={"cheapside": {"basket_leader_buy": True}}, size=5.0,
+                         limit_price=0.66, max_entry_price=0.66)
+    assert w.e.revalidate(ev, _book("token", 0.64, 0.65)) is None
+    assert w.e.revalidate(ev, _book("token", 0.82, 0.83)) is Reason.PRICE_BAND
+
+
+def test_basket_leader_buy_is_ready_as_soon_as_six_cheap_legs_are_filled(monkeypatch, model_path):
+    """After the six cheap fills, the next evaluation of ANY market must emit the
+    leader recovery (live.py routes it to the favourite's book). A long cooldown
+    or waiting for the favourite's own scan lets the ask run away."""
+    assets = ("BTC", "ETH", "SOL", "XRP", "DOGE", "BNB", "HYPE")
+    w = _World(monkeypatch, model_path, portfolio_basket_enabled=True,
+               portfolio_basket_market_count=7, portfolio_basket_buy_count=6,
+               portfolio_basket_shares=5.0, portfolio_basket_max_average_ask=0.20,
+               portfolio_basket_target_pnl_usdc=0.10, portfolio_repair_cooldown_s=2.0,
+               portfolio_basket_min_leader_ask=0.55, portfolio_basket_max_leader_ask=0.78,
+               portfolio_basket_abort_leader_ask=0.82,
+               assets=",".join(assets), max_order_usdc=50.0)
+    assert w.e.entry_retry_ms <= 250.0
+    now = T0 + 100_000.0
+    metas = {a: w.meta(a) for a in assets}
+    # Six cheap DOWNs at ~0.10 and HYPE favourite UP at 0.70.
+    for a in assets:
+        meta = metas[a]
+        if a == "HYPE":
+            up, dn = _book(meta.market.yes_token_id, 0.68, 0.70), _book(meta.market.no_token_id, 0.28, 0.30)
+        else:
+            up, dn = _book(meta.market.yes_token_id, 0.88, 0.90), _book(meta.market.no_token_id, 0.08, 0.10)
+        ages = {meta.market.yes_token_id: 50.0, meta.market.no_token_id: 50.0}
+        w.e.market_quotes[meta.market.slug] = {
+            "t": now, "meta": meta, "up": up, "down": dn, "valid": True, "quote_ages": ages}
+        if a != "HYPE":
+            w.e.inventory[meta.market.slug] = {"DOWN": {"shares": 5.0, "cost": 0.5}}
+    plan = {
+        "epoch": int(T0 // 1000), "created": now, "average_cheap_ask": 0.10,
+        "armed_average_cheap_ask": 0.10, "complete": False,
+        "cheap": [{"slug": metas[a].market.slug, "side": "DOWN", "cheap": "DOWN",
+                   "leader": "UP", "asset": a} for a in assets if a != "HYPE"],
+        "leader": {"slug": metas["HYPE"].market.slug, "side": "UP", "cheap": "DOWN",
+                   "leader": "UP", "asset": "HYPE"},
+    }
+    w.e.basket_plans[str(int(T0 // 1000))] = plan
+    # Scan BTC (a cheap market), not HYPE: the leader order must still come out
+    # immediately, with no 2 s repair cooldown on the first attempt.
+    btc = metas["BTC"]
+    ev = w.e._portfolio_basket(
+        Evaluation(slug=btc.market.slug, asset="BTC", seconds_left=200.0, reason=None),
+        btc, w.e.market_quotes[btc.market.slug]["up"], w.e.market_quotes[btc.market.slug]["down"],
+        now, balance=100.0, book_age_ms=50.0,
+        quote_ages=w.e.market_quotes[btc.market.slug]["quote_ages"])
+    assert ev is not None, w.e.last_cheapside
+    assert ev.slug == metas["HYPE"].market.slug and ev.side == "UP"
+    assert ev.features["cheapside"].get("basket_leader_buy")
+    assert ev.size >= 5.0

@@ -184,3 +184,54 @@ async def test_the_stream_follows_the_chosen_bot(http):
             assert msg["bot"] == "spotlag-paper" and msg["deploy_mode"] == "paper"
     finally:
         stop.set()
+
+
+# ───────────────────────────── the Restart modal's "fresh" choice (2026-10-13) ─────────────────────────────
+
+def test_fresh_paths_are_the_tagged_files_only(data_dir):
+    d = data_dir
+    for name in ("live_trades.lp-paper.jsonl", "open_positions.lp-paper.json", "leader_pair_state.lp-paper.json",
+                 "decisions.lp-paper.jsonl", "live_state.lp-paper.json", "live_trades.other-paper.jsonl", "earnings.jsonl",
+                 "live_trades.jsonl"):
+        (d / name).write_text("x")
+    (d / "live_state.lp-paper.history").mkdir()
+    (d / "charts").mkdir()
+    got = {p.name for p in srv.fresh_paths("lp-paper")}
+    assert got == {"live_trades.lp-paper.jsonl", "open_positions.lp-paper.json", "leader_pair_state.lp-paper.json",
+                   "decisions.lp-paper.jsonl", "live_state.lp-paper.json", "live_state.lp-paper.history"}
+    assert srv.fresh_paths("../x") == [] and srv.fresh_paths("") == []
+
+
+def test_fresh_restart_stops_removes_and_restarts_but_never_a_real_money_bot(data_dir, monkeypatch):
+    d = data_dir
+    (d / "live_trades.lp-paper.jsonl").write_text("row\n")
+    (d / "leader_pair_state.lp-paper.json").write_text("{}")
+    (d / "earnings.jsonl").write_text("keep\n")
+    calls = []
+    apps = [{"name": "tpb-lp-paper", "status": "online", "tag": "lp-paper", "cwd": str(srv.REPO_ROOT), "live": False},
+            {"name": "tpb-x-live", "status": "online", "tag": "x-live", "cwd": str(srv.REPO_ROOT), "live": True}]
+    monkeypatch.setattr(srv, "_pm2_apps", lambda: apps)
+    monkeypatch.setattr(srv, "_ecosystem_apps", lambda: [])
+    monkeypatch.setattr(srv, "_pm2", lambda *a: (calls.append(a), (0, "ok"))[1])
+    out = srv.pm2_control("restart", "lp-paper", fresh=True)
+    assert out["ok"] and calls == [("stop", "tpb-lp-paper"), ("restart", "tpb-lp-paper")]
+    assert sorted(out["removed"]) == ["leader_pair_state.lp-paper.json", "live_trades.lp-paper.jsonl"]
+    assert not (d / "live_trades.lp-paper.jsonl").exists() and (d / "earnings.jsonl").read_text() == "keep\n"
+    assert "fresh" in out["reason"]
+    # a plain restart deletes nothing
+    (d / "live_trades.lp-paper.jsonl").write_text("row\n")
+    calls.clear()
+    out = srv.pm2_control("restart", "lp-paper")
+    assert calls == [("restart", "tpb-lp-paper")] and (d / "live_trades.lp-paper.jsonl").exists() and out["removed"] == []
+    # a real-money app is refused the fresh restart and nothing of it is touched
+    (d / "live_trades.x-live.jsonl").write_text("real\n")
+    calls.clear()
+    out = srv.pm2_control("restart", "x-live", fresh=True)
+    assert out["ok"] is False and "real money" in out["reason"] and calls == [] and (d / "live_trades.x-live.jsonl").exists()
+    # the live flag comes from the app's arguments
+    monkeypatch.undo()
+    monkeypatch.setattr(srv, "_pm2", lambda *a: (0, json.dumps([
+        {"name": "a", "pm2_env": {"status": "online", "args": ["-m", "x", "--mode", "micro-live", "--data-tag", "a-live"], "pm_cwd": "/r"}},
+        {"name": "b", "pm2_env": {"status": "online", "args": "-m x --mode paper --data-tag b-paper", "pm_cwd": "/r"}},
+        {"name": "c", "pm2_env": {"status": "online", "args": ["--live", "--armed", "--data-tag", "c"], "pm_cwd": "/r"}}])))
+    assert {a["name"]: a["live"] for a in srv._pm2_apps()} == {"a": True, "b": False, "c": True}

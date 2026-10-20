@@ -21,7 +21,10 @@ def _bot(fills, bids):
         positions[tok].apply(Fill("o", tok, side, px, size, fee, 0.0, 0.0, 0.0, expected_price=px))
     market = SimpleNamespace(yes_token_id="UP", no_token_id="DN")
     lm = SimpleNamespace(meta=SimpleNamespace(market=market), books={t: _book(b) for t, b in bids.items()})
-    return SimpleNamespace(exchange=SimpleNamespace(positions=positions)), lm
+    bot = SimpleNamespace(exchange=SimpleNamespace(positions=positions), _last_mark={})
+    bot._true_book = lambda tok: None
+    bot._mark = lambda tok: LiveBot._mark(bot, tok)
+    return bot, lm
 
 
 def test_a_pair_shows_each_tokens_cost_and_the_pnl_of_each_outcome():
@@ -43,9 +46,12 @@ def test_one_side_held_and_a_partial_sell_count_net():
     assert p["pnl_now"] == pytest.approx(6.0 * 0.65 - 3.2)
 
 
-def test_no_trade_is_none_and_a_held_token_without_a_bid_has_no_pnl_now():
+def test_no_trade_is_none_and_a_held_token_without_a_bid_uses_equity_mark():
     bot, lm = _bot([], {"UP": 0.5, "DN": 0.5})
     assert LiveBot._market_position(bot, lm) is None
     bot, lm = _bot([("UP", Side.BUY, 0.60, 10.0, 0.0)], {"UP": None, "DN": 0.4})
+    # No book bid: fall back to the same mark equity uses (here avg cost 0.60).
     p = LiveBot._market_position(bot, lm)
-    assert p["pnl_now"] is None and p["up"]["value"] is None and p["pnl_up_win"] == pytest.approx(4.0)
+    assert p["up"]["bid"] is None and p["up"]["mark"] == pytest.approx(0.60)
+    assert p["up"]["value"] == pytest.approx(6.0)
+    assert p["pnl_now"] == pytest.approx(0.0) and p["pnl_up_win"] == pytest.approx(4.0)

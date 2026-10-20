@@ -21,6 +21,22 @@ from __future__ import annotations
 import math
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
+
+#: Operator day boundary for daily realised PnL (no DST).
+GMT9 = timezone(timedelta(hours=9), "GMT+9")
+#: Rolling window for drawdown reference (balance 24h ago).
+DRAWDOWN_LOOKBACK_S = 24 * 3600.0
+#: Keep a little more than 24h of samples so the lookback always has a hit.
+BALANCE_HISTORY_KEEP_S = 26 * 3600.0
+#: Min gap between stored balance samples (live ticks are ~200ms).
+BALANCE_SAMPLE_MIN_GAP_S = 30.0
+
+
+def gmt9_day_id(now_s: float | None = None) -> int:
+    """Calendar day id in GMT+9 as YYYYMMDD."""
+    ts = time.time() if now_s is None else float(now_s)
+    return int(datetime.fromtimestamp(ts, tz=GMT9).strftime("%Y%m%d"))
 
 
 @dataclass(slots=True)
@@ -81,7 +97,8 @@ class RiskManager:
     realised_total: float = 0.0
     realised_today: float = 0.0
     peak_equity: float = 0.0
-    day: int = field(default_factory=lambda: int(time.time() // 86400))
+    #: GMT+9 calendar day as YYYYMMDD; 0 = unset (first _roll_day assigns it).
+    day: int = 0
     consecutive_losses: int = 0
     #: markets with an entry order working (resting or in flight): they count
     #: toward the concurrent-position cap, or four resting orders can all
@@ -91,16 +108,66 @@ class RiskManager:
     #: toward EXPOSURE as well, or several markets signalling in one tick each
     #: see the same free budget and together fill past it
     pending_usdc: dict = field(default_factory=dict)
+    #: Optional marked account balance/equity from the live loop (cash + inventory).
+    _marked_balance: float | None = field(default=None, repr=False)
+    #: (unix_s, balance) samples for the rolling 24h drawdown reference.
+    _balance_history: list = field(default_factory=list, repr=False)
+    _last_balance_sample_ts: float = field(default=0.0, repr=False)
 
     def __post_init__(self) -> None:
         self.peak_equity = self.starting_balance
+        now = time.time()
+        # Seed history with the initial bankroll so early drawdown has a floor.
+        self._balance_history = [(now, float(self.starting_balance))]
+        self._last_balance_sample_ts = now
+        self._roll_day(now)
 
     # ---------------------------------------------------------- bookkeeping
 
+    def note_balance(self, balance: float, now_s: float | None = None) -> None:
+        """Push the account's current balance/equity for rolling 24h drawdown."""
+        if balance is None:
+            return
+        now = time.time() if now_s is None else float(now_s)
+        bal = float(balance)
+        self._marked_balance = bal
+        if (not self._balance_history
+                or now - self._last_balance_sample_ts >= BALANCE_SAMPLE_MIN_GAP_S
+                or now < self._last_balance_sample_ts):
+            self._balance_history.append((now, bal))
+            self._balance_history.sort(key=lambda x: x[0])
+            self._last_balance_sample_ts = max(self._last_balance_sample_ts, now)
+            cutoff = max(now, self._balance_history[-1][0]) - BALANCE_HISTORY_KEEP_S
+            while len(self._balance_history) > 1 and self._balance_history[0][0] < cutoff:
+                self._balance_history.pop(0)
+
+    def balance_history_export(self) -> list[list[float]]:
+        """Compact [[ts_s, balance], ...] for persistence."""
+        return [[float(ts), float(bal)] for ts, bal in self._balance_history[-2048:]]
+
+    def balance_history_restore(self, rows: list | None) -> None:
+        if not rows:
+            return
+        hist: list[tuple[float, float]] = []
+        for row in rows:
+            try:
+                hist.append((float(row[0]), float(row[1])))
+            except (TypeError, ValueError, IndexError):
+                continue
+        if not hist:
+            return
+        hist.sort(key=lambda x: x[0])
+        cutoff = time.time() - BALANCE_HISTORY_KEEP_S
+        self._balance_history = [(t, b) for t, b in hist if t >= cutoff]
+        if self._balance_history:
+            self._last_balance_sample_ts = self._balance_history[-1][0]
+
     def _roll_day(self, now_s: float) -> None:
-        d = int(now_s // 86400)
-        if d != self.day:
-            self.day, self.realised_today = d, 0.0
+        d = gmt9_day_id(now_s)
+        if d == self.day:
+            return
+        self.day = d
+        self.realised_today = 0.0
 
     def on_submit(self, slug: str, usdc: float = 0.0, asset: str = "", epoch: int = 0) -> None:
         """An entry order is working. ``usdc`` is its worst case (limit x size)."""
@@ -172,17 +239,55 @@ class RiskManager:
                    if p.epoch == epoch and p.side == side and p.asset != asset)
 
     @property
+    def current_equity(self) -> float:
+        """Bankroll after realised PnL (open inventory is still in exposure, not MTM)."""
+        return self.starting_balance + self.realised_total
+
+    @property
+    def current_balance(self) -> float:
+        """Marked account balance when the live loop supplies it; else realised equity."""
+        if self._marked_balance is not None:
+            return float(self._marked_balance)
+        return self.current_equity
+
+    def balance_24h_ago(self, now_s: float | None = None) -> float:
+        """Balance recorded ~24 hours ago; initial bankroll if history is shorter."""
+        now = time.time() if now_s is None else float(now_s)
+        target = now - DRAWDOWN_LOOKBACK_S
+        ref: float | None = None
+        for ts, bal in self._balance_history:
+            if ts <= target + 1e-9:
+                ref = float(bal)
+            else:
+                break
+        if ref is not None:
+            return ref
+        return float(self.starting_balance)
+
+    @property
+    def drawdown_reference(self) -> float:
+        """Balance from 24 hours ago (or initial balance before 24h of samples)."""
+        return self.balance_24h_ago()
+
+    @property
     def drawdown(self) -> float:
-        return self.peak_equity - (self.starting_balance + self.realised_total)
+        """``balance_24h_ago − current_balance``.
+
+        Positive when below the 24h-ago balance; negative when ahead.
+        Until 24h of samples exist, the reference is the initial bankroll.
+        """
+        return self.drawdown_reference - self.current_balance
 
     # ---------------------------------------------------------------- gates
 
     def halted(self, now_s: float | None = None) -> RiskVerdict:
-        self._roll_day(time.time() if now_s is None else now_s)
-        if self.realised_today <= -self.cfg.max_daily_loss_usdc:
+        now = time.time() if now_s is None else float(now_s)
+        self._roll_day(now)
+        if self.cfg.max_daily_loss_usdc > 0 and self.realised_today <= -self.cfg.max_daily_loss_usdc:
             return RiskVerdict(False, "RISK_LIMIT", f"daily loss {self.realised_today:+.2f}")
-        if self.drawdown >= self.cfg.max_drawdown_usdc:
-            return RiskVerdict(False, "RISK_LIMIT", f"drawdown {self.drawdown:.2f}")
+        dd = self.balance_24h_ago(now) - self.current_balance
+        if self.cfg.max_drawdown_usdc > 0 and dd >= self.cfg.max_drawdown_usdc:
+            return RiskVerdict(False, "RISK_LIMIT", f"drawdown {dd:.2f}")
         return RiskVerdict(True)
 
     def check(self, slug: str, asset: str, epoch: int, stake: float, add_to_open: bool = False) -> RiskVerdict:
@@ -280,6 +385,9 @@ class RiskManager:
                                   for a in sorted({p.asset for p in self.open.values()})},
             "realised_today": round(self.realised_today, 2),
             "drawdown": round(self.drawdown, 2),
+            "drawdown_reference": round(self.drawdown_reference, 2),
+            "balance_24h_ago": round(self.balance_24h_ago(), 2),
+            "day_gmt9": self.day,
             "peak_equity": round(self.peak_equity, 2),
             "consecutive_losses": self.consecutive_losses,
             "halted": (lambda v: None if v.ok else v.detail)(self.halted()),

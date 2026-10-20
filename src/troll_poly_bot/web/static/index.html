@@ -104,6 +104,7 @@
           <p class="card-sub" id="chart-sub">What the market charges for each side, and the crypto price against the strike.</p>
         </div>
         <div class="switch-stack">
+          <button type="button" class="btn btn-sm" id="all-charts-open">Show all charts</button>
           <label class="switch" hidden title="Draw the strike distance on the token chart as the Up probability it implies, instead of in its own panel">
             <input type="checkbox" id="overlay-toggle">
             <span class="switch-track" aria-hidden="true"></span>
@@ -117,6 +118,36 @@
         </div>
       </div>
       <div class="chips" id="market-picker"></div>
+      <div class="skip-tokens" id="skip-tokens" aria-label="Skip tokens from trading" hidden>
+        <div class="skip-tokens-head">
+          <span class="skip-tokens-label">Skip trading</span>
+          <span class="skip-tokens-hint" id="skip-tokens-hint">Click a token to stop the bot buying it. Click again to allow.</span>
+        </div>
+        <div class="chips skip-chips" id="skip-token-chips"></div>
+        <p class="skip-tokens-status" id="skip-tokens-status" aria-live="polite"></p>
+      </div>
+      <div class="skip-tokens lower-side-tokens" id="lower-side-tokens" aria-label="Lower-side only tokens" hidden>
+        <div class="skip-tokens-head">
+          <span class="skip-tokens-label">Lower-side only</span>
+          <span class="skip-tokens-hint" id="lower-side-tokens-hint">Click a token so the bot only uses it as the cheaper leg of a pair (not at a high ask). CMC only.</span>
+        </div>
+        <div class="chips skip-chips" id="lower-side-token-chips"></div>
+        <p class="skip-tokens-status" id="lower-side-tokens-status" aria-live="polite"></p>
+      </div>
+      <div class="skip-tokens skip-pairs-mode" id="skip-pairs-mode" aria-label="Skip high-wipe pairs" hidden>
+        <div class="skip-tokens-head">
+          <span class="skip-tokens-label">Skip pairs mode</span>
+          <span class="skip-tokens-hint" id="skip-pairs-mode-hint">When on, the bot skips opposite-pair directions the wipe model flags as likely full losses. CMC only.</span>
+        </div>
+        <label class="switch" id="skip-pairs-mode-switch" title="Skip pair directions with high calibrated wipe probability">
+          <input type="checkbox" id="skip-pairs-mode-input" />
+          <span class="switch-track" aria-hidden="true"></span>
+          <span class="switch-label" id="skip-pairs-mode-label">Skip high-wipe pairs</span>
+        </label>
+        <p class="skip-tokens-status" id="skip-pairs-mode-status" aria-live="polite"></p>
+      </div>
+      <div class="cheapside-average" id="cheapside-average" aria-live="polite" hidden></div>
+      <div class="cheapside-projection" id="cheapside-projection" aria-live="polite" hidden></div>
       <!-- the selected market's position (the user, 2026-10-09): P&L now and if each side wins, shares and cost per token -->
       <div class="mkt-pos" id="market-position" aria-label="Position in this market" hidden></div>
       <div class="market-body">
@@ -163,7 +194,7 @@
                     title="Sell every token the selected bot holds in the selected market, UP and DOWN, at the bid (fill-and-kill)">Sell all tokens</button>
             <div class="seg seg-sm" id="orders-scope" role="group" aria-label="Which orders">
               <button class="seg-btn is-on" type="button" data-scope="all">All markets</button>
-              <button class="seg-btn" type="button" data-scope="market">This market</button>
+              <button class="seg-btn" type="button" data-scope="market" title="Orders on every currently open market window">This market</button>
             </div>
           </div>
           <div class="td-orders-scroll">
@@ -314,16 +345,12 @@
       <div>
         <p class="eyebrow">On disk</p>
         <h3>History across all runs</h3>
-        <p class="card-sub" id="history-sub">
-          One row per position, with when it was bought and when it was sold or settled.
-          A position is often entered in two fills and then exited, which is several
-          events for one trade &mdash; those are folded together here. Click a row to open the trade.
-        </p>
+        <p class="card-sub" id="history-sub">One row per 5-minute market window. All positions, fills,
+          and settlement events for that window are grouped together. Click a row to inspect the market.</p>
       </div>
       <div class="card-actions">
-        <div class="seg" id="history-view" role="group" aria-label="How to list the history">
-          <button class="seg-btn is-on" type="button" data-view="trips">Trades</button>
-          <button class="seg-btn" type="button" data-view="events">Raw events</button>
+        <div class="seg" id="history-view" role="group" aria-label="History unit">
+          <span class="seg-btn is-on">5-minute markets</span>
         </div>
         <label class="ctl-field" id="history-mode-field" hidden>
           <span>Money</span>
@@ -483,6 +510,33 @@
 
 <!-- one trade: its window's prices with the orders and fills on it, and the
      order list beside it. Opened from a trades or ledger row (app.js). -->
+<dialog id="restart-dialog" class="trade-dialog restart-dialog" aria-labelledby="restart-title">
+  <div class="td-inner" tabindex="-1" autofocus>
+    <div class="td-head">
+      <div>
+        <p class="eyebrow">Restart</p>
+        <h3 id="restart-title">Restart bot</h3>
+        <p class="card-sub" id="restart-sub"></p>
+      </div>
+      <div class="card-actions">
+        <button class="btn btn-sm" id="restart-cancel" type="button">Cancel</button>
+      </div>
+    </div>
+    <div class="restart-options">
+      <button class="btn restart-option" id="restart-keep" type="button">
+        <strong>Restart, keep the data</strong>
+        <span>The trade log keeps growing, open positions and the strategy's inventory are restored. The paper balance
+          starts again at the app's --balance minus what the restored positions cost.</span>
+      </button>
+      <button class="btn btn-danger restart-option" id="restart-fresh" type="button">
+        <strong>Restart fresh: clear the data, initial balance</strong>
+        <span id="restart-fresh-what">Stops the bot, deletes every data/*.&lt;tag&gt;.json[l] file it wrote (ledger, open
+          positions, state, decisions, forensics, strategy state) and its chart history, then starts it at the app's
+          --balance with an empty ledger. Nothing untagged is touched. Not offered for real-money bots.</span>
+      </button>
+    </div>
+  </div>
+</dialog>
 <dialog id="trade-dialog" class="trade-dialog" aria-labelledby="trade-title">
   <div class="td-inner" tabindex="-1" autofocus>
     <div class="td-head">
@@ -522,6 +576,20 @@
       </aside>
     </div>
     <p class="card-foot" id="trade-foot"></p>
+  </div>
+</dialog>
+<dialog id="all-charts-dialog" class="trade-dialog all-charts-dialog" aria-labelledby="all-charts-title">
+  <div class="td-inner" tabindex="-1">
+    <div class="td-head">
+      <div>
+        <p class="eyebrow">Market</p>
+        <h3 id="all-charts-title">Open market charts</h3>
+        <p class="card-sub">Live token prices for every open market.</p>
+      </div>
+      <div class="card-actions"><button class="btn btn-sm" id="all-charts-close" type="button">Close</button></div>
+    </div>
+    <div class="all-charts-summary" id="all-charts-summary" aria-live="polite"></div>
+    <div id="all-charts-grid" class="all-charts-grid"></div>
   </div>
 </dialog>
 

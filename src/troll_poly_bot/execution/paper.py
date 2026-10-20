@@ -481,7 +481,7 @@ class PaperExchange:
         """
         if order.side is Side.BUY:
             best_ask = book.best_ask
-            if best_ask is None or best_ask >= order.price:
+            if best_ask is None or (best_ask > order.price if order.fill_at_touch else best_ask >= order.price):
                 return []
         else:
             best_bid = book.best_bid

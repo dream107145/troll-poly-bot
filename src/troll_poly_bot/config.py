@@ -19,9 +19,12 @@ from .market.discovery import CANDIDATE_ASSETS
 from .risk.limits import RiskConfig
 from .strategy.btc_hedge import BtcHedgeConfig
 from .strategy.cheapside import CheapSideConfig
+from .strategy.cross_market_arb import CrossMarketArbConfig
+from .strategy.cross_market_correlation import CrossMarketCorrelationConfig
 from .strategy.late_confidence import LateConfidenceConfig
 from .strategy.book_momentum import BookMomentumConfig
 from .strategy.rising_recovery import RisingRecoveryConfig
+from .strategy.leader_pair import LeaderPairConfig
 from .strategy.confirmation_momentum import CMConfig
 from .strategy.preopen_maker import POMConfig
 from .strategy.copytrade import CopyConfig
@@ -140,12 +143,19 @@ class BotConfig:
     repriced_momentum: RepricedMomentumConfig = field(default_factory=RepricedMomentumConfig.from_env)
     #: the experimental CHEAPSIDE's knobs and its feature flag (TPB_CHEAPSIDE_*); paper only
     cheapside: CheapSideConfig = field(default_factory=CheapSideConfig.from_env)
+    #: CROSS_MARKET_ARB: seven-market guaranteed-profit portfolios (TPB_CMA_*); paper only, disabled by default
+    cross_market_arb: CrossMarketArbConfig = field(default_factory=CrossMarketArbConfig.from_env)
+    #: CROSS_MARKET_CORRELATION: pair-wise opposite-outcome EV trades (TPB_CMC_*); paper only, disabled by default
+    cross_market_correlation: CrossMarketCorrelationConfig = field(
+        default_factory=CrossMarketCorrelationConfig.from_env)
     #: the experimental LATE_CONFIDENCE's knobs and its feature flag (TPB_LATECONF_*); paper only
     late_confidence: LateConfidenceConfig = field(default_factory=LateConfidenceConfig.from_env)
     #: the experimental BOOK_MOMENTUM's knobs and its feature flag (TPB_BOOKMOM_*); paper only
     book_momentum: BookMomentumConfig = field(default_factory=BookMomentumConfig.from_env)
     #: the experimental RISING-TOKEN RECOVERY's knobs and its feature flag (TPB_RTR_*); paper only
     rising_recovery: RisingRecoveryConfig = field(default_factory=RisingRecoveryConfig.from_env)
+    #: LEADER_PAIR's knobs and its feature flag (TPB_LP_*); paper only (the user's spec, 2026-10-13)
+    leader_pair: LeaderPairConfig = field(default_factory=LeaderPairConfig.from_env)
     #: the experimental BTC_CONFIRMATION_MOMENTUM's knobs and its feature flag (TPB_CM_*); paper only
     confirmation_momentum: CMConfig = field(default_factory=CMConfig.from_env)
     #: the experimental PREOPEN_MAKER's knobs and its feature flag (TPB_POM_*); paper only

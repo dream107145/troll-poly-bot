@@ -75,9 +75,12 @@ from .pricing.vol import EwmaVol, TwoScaleVol
 from .risk.limits import OpenPosition, RiskManager
 from .signals.costs import FeeSchedule
 from .strategy.cheapside import CheapSideEngine
+from .strategy.cross_market_arb import CrossMarketArbEngine
+from .strategy.cross_market_correlation import CrossMarketCorrelationEngine
 from .strategy.late_confidence import LateConfidenceEngine
 from .strategy.book_momentum import BookMomentumEngine
 from .strategy.rising_recovery import RisingRecoveryEngine
+from .strategy.leader_pair import LeaderPairEngine
 from .strategy.confirmation_momentum import ConfirmationMomentumEngine
 from .strategy.preopen_maker import PreopenMakerEngine
 from .strategy.copytrade import CopyTradeEngine
@@ -667,6 +670,16 @@ class LiveBot:
             # behind TPB_CHEAPSIDE_ENABLED=1, PAPER ONLY (__main__.check_cheapside); a SpotLagEngine
             # subclass with its OWN config (TPB_CHEAPSIDE_*), budget and model file
             self.engine = CheapSideEngine(self.cfg.engine, self.cfg.cheapside, self.risk, FeatureEngine())
+        elif self.cfg.engine.strategy == "cross_market_arb":
+            # behind TPB_CMA_ENABLED=1, PAPER ONLY (__main__.check_cross_market_arb); seven-market
+            # guaranteed-profit portfolios with OWN config (TPB_CMA_*), reservations and risk caps
+            self.engine = CrossMarketArbEngine(self.cfg.engine, self.cfg.cross_market_arb, self.risk,
+                                               FeatureEngine())
+        elif self.cfg.engine.strategy == "cross_market_correlation":
+            # behind TPB_CMC_ENABLED=1, PAPER ONLY (__main__.check_cross_market_correlation); pair-wise
+            # opposite-outcome correlation trades with OWN config (TPB_CMC_*), model, and risk caps
+            self.engine = CrossMarketCorrelationEngine(
+                self.cfg.engine, self.cfg.cross_market_correlation, self.risk, FeatureEngine())
         elif self.cfg.engine.strategy == "late_confidence":
             # behind TPB_LATECONF_ENABLED=1, PAPER ONLY (__main__.check_late_confidence); a SpotLagEngine subclass
             # with its OWN config (TPB_LATECONF_*) and budget: the >0.98 token in the last 30 s when z >= 2
@@ -679,6 +692,12 @@ class LiveBot:
             # behind TPB_RTR_ENABLED=1, PAPER ONLY (__main__.check_rising_recovery): maker bids on the rising token, the
             # opposite token bought only as pairs under $1 after the rise ends, held to settlement (TPB_RTR_*)
             self.engine = RisingRecoveryEngine(self.cfg.engine, self.cfg.rising_recovery, self.risk, FeatureEngine())
+        elif self.cfg.engine.strategy == "leader_pair":
+            # behind TPB_LP_ENABLED=1, PAPER ONLY unless TPB_LP_ALLOW_REAL=1 (__main__.check_leader_pair): the user's
+            # 2026-10-13 spec -- initial leader, 5-s opposite accumulation, FIFO pairs, falling-leader / recovery
+            # state machine, held to settlement; IOC buys through the pair-order hooks; state persisted per data tag
+            self.engine = LeaderPairEngine(self.cfg.engine, self.cfg.leader_pair, self.risk, FeatureEngine(),
+                                           state_path=_sibling(trade_log, "leader_pair_state").with_suffix(".json"))
         elif self.cfg.engine.strategy == "copytrade":
             # behind TPB_COPY_ENABLED=1, PAPER ONLY (__main__.check_copytrade): follows one wallet's published fills
             # with FOK buys through the pair-order hooks
@@ -723,7 +742,10 @@ class LiveBot:
             self.engine = StrategyEngine(self.cfg.engine, self.risk, FeatureEngine())
         else:
             raise ValueError(f"unknown strategy {self.cfg.engine.strategy!r}: analytic | momentum_taker | spot_lag"
-                             " | repriced_momentum | cheapside | late_confidence | book_momentum | rising_recovery | confirmation_momentum | preopen_maker | copytrade | fastclip | btc_trend_reversal_hedge | triangle")
+                             " | repriced_momentum | cheapside | cross_market_arb | cross_market_correlation"
+                             " | late_confidence | book_momentum | rising_recovery | leader_pair"
+                             " | confirmation_momentum | preopen_maker | copytrade | fastclip"
+                             " | btc_trend_reversal_hedge | triangle")
         # spot-lag shocks are evaluated the moment they arrive when event_driven is on
         # (TPB_SPOT_LAG_EVENT_DRIVEN=1, or the dashboard): see the _shock_driven property
         if isinstance(self.engine, SpotLagEngine):
@@ -988,8 +1010,11 @@ class LiveBot:
                              "fees_paid": round(pos.fees_paid, 6), "usdc": round(usdc, 6),
                              "entry_ms": entry_ms.get(token), "close_ts": close_ts})
         persist = getattr(self.engine, "persist_state", None)
+        hist_export = getattr(self.risk, "balance_history_export", None)
         doc = {"version": 1, "saved_ms": self.clock.now(), "mode": self.mode_label, "day": self.risk.day,
-               "realised_today": round(self.risk.realised_today, 6), "positions": rows,
+               "realised_today": round(self.risk.realised_today, 6),
+               "balance_history": hist_export() if callable(hist_export) else [],
+               "positions": rows,
                # an engine's own per-market state (pairlock cycles), restored with the positions
                "engine_state": persist() if callable(persist) else None,
                # the working pair orders (triangle): the paper venue forgets resting orders at a restart
@@ -1017,6 +1042,9 @@ class LiveBot:
             # the daily loss budget survives a restart; the loss STREAK does not
             # (restarting after a streak halt is the operator's acknowledgement)
             self.risk.realised_today = float(doc.get("realised_today") or 0.0)
+        restore_hist = getattr(self.risk, "balance_history_restore", None)
+        if callable(restore_hist):
+            restore_hist(doc.get("balance_history"))
         now = self.clock.now()
         for r in doc.get("positions") or []:
             slug, token = r.get("slug"), r.get("token_id")
@@ -1069,11 +1097,41 @@ class LiveBot:
         if self._restored_meta:
             log.warning("[POSITION] %d position(s) restored; exposure %.2f of %.2f USDC",
                         len(self._restored_meta), self.risk.exposure_total(), self.risk.cfg.max_total_exposure_usdc)
+        # Paper keep-history previously only subtracted open costs from --balance, so
+        # realized PnL vanished on every restart (cash jumped back toward the start).
+        # Re-anchor cash to the last marked equity in balance_history.
+        if not self.is_live:
+            hist = doc.get("balance_history") or []
+            if hist:
+                try:
+                    last_eq = float(hist[-1][1])
+                except (TypeError, ValueError, IndexError):
+                    last_eq = None
+                if last_eq is not None:
+                    inv_cost = 0.0
+                    for pos in self.exchange.positions.values():
+                        if abs(pos.shares) > EXIT_EPS:
+                            inv_cost += float(pos.cost_basis + pos.fees_paid)
+                    # Marks are not ready yet; cost is the restore-time proxy for inventory.
+                    self.exchange.balance = last_eq - inv_cost
+                    log.warning("[POSITION] paper cash re-anchored to %.2f (last equity %.2f − open cost %.2f)",
+                                self.exchange.balance, last_eq, inv_cost)
         restore_state = getattr(self.engine, "restore_state", None)
         if callable(restore_state):
             restore_state(doc.get("engine_state"), now)
         hold = getattr(self.engine, "on_pair_submit", None)
-        for i, pr in enumerate(doc.get("pairs") or []):
+        restored_pairs = list(doc.get("pairs") or [])
+        if getattr(self.engine, "one_pair_per_market_side", False):
+            unique, seen = [], set()
+            for pr in restored_pairs:
+                key = (pr.get("slug"), pr.get("side"))
+                if key in seen:
+                    log.warning("[PAIR] %s %s duplicate saved order skipped during restore", *key)
+                    continue
+                seen.add(key)
+                unique.append(pr)
+            restored_pairs = unique
+        for i, pr in enumerate(restored_pairs):
             if float(pr.get("close_ts") or 0.0) <= now or not pr.get("token_id") or pr.get("tif") == "FOK":
                 continue                                  # a FOK hedge in flight at the stop resolved at the venue
             if pr.get("cancelling"):
@@ -1280,7 +1338,19 @@ class LiveBot:
                 # pair-lock R's own settings: pairlock.* for the recovery bot, pairbtc.* for the conditions-rule bot
                 # (tpb-pairlock-paper), so a value set for one never reaches the other through the shared file
                 "pairlock": rp if rp is not None and rp.entry_mode != "conditions" else None,
-                "pairbtc": rp if rp is not None and rp.entry_mode == "conditions" else None}
+                "pairbtc": rp if rp is not None and rp.entry_mode == "conditions" else None,
+                # LEADER_PAIR's lp.* and RISING-RECOVERY's rtr.* (the user, 2026-10-13: both paper bots' parameters on
+                # the Variables page); each config object is also what the engine's markets read, so a change applies
+                # to the next decision
+                "lp": eng.scfg if isinstance(eng, LeaderPairEngine) else None,
+                "rtr": eng.scfg if isinstance(eng, RisingRecoveryEngine) else None,
+                # Cheapside's own basket and individual-entry parameters are separate from the inherited
+                # spot_lag.* controls, but point to the same live config object.
+                "cheapside": eng.scfg if isinstance(eng, CheapSideEngine) else None,
+                # CROSS_MARKET_ARB's cma.* knobs (paper-only guaranteed-profit portfolios)
+                "cma": eng.scfg if isinstance(eng, CrossMarketArbEngine) else None,
+                # CROSS_MARKET_CORRELATION's cmc.* knobs (paper-only; statistical mode off by default)
+                "cmc": eng.scfg if isinstance(eng, CrossMarketCorrelationEngine) else None}
 
     # ───────────────────────────── discovery ─────────────────────────────
 
@@ -1937,6 +2007,14 @@ class LiveBot:
         now = self.clock.now()
         self._mark_due(now)
         self._forget_stale_lag_flags(now)
+        # Drawdown = balance_24h_ago − current marked equity/cash.
+        try:
+            marked = float(self.exchange.equity(self._mark))
+        except Exception:
+            marked = float(getattr(self.exchange, "balance", 0.0) or 0.0)
+        now_s = now / 1000.0 if now > 1e12 else float(now)
+        self.risk.note_balance(marked, now_s=now_s)
+        self.risk.halted(now_s=now_s)
 
         # The venue's strike is the trailing 60s TWAP at the window open. Only
         # offer one once the full window is backed by observations.
@@ -1992,7 +2070,9 @@ class LiveBot:
                 continue
             # `exited` markets are done for the window: re-entering the book we
             # just de-risked into would pay the spread twice to undo the exit
-            if m.strike <= 0 or lm.settled or (lm.exited and not self._reentry) or now >= m.close_ts:
+            if ((m.strike <= 0 and getattr(self.engine, "requires_strike", True))
+                    or (now < m.open_ts and getattr(self.engine, "requires_market_open", False)) or lm.settled
+                    or (lm.exited and not self._reentry) or now >= m.close_ts):
                 continue
             if lm.inflight > 0:
                 self._count_exec("ORDER_IN_FLIGHT")
@@ -2036,16 +2116,47 @@ class LiveBot:
                 self._engine_refused(ev, f"entries paused by the guard ({','.join(self.guard.tripped)})")
                 continue
 
+            # Basket / multi-market engines may return an order for a different
+            # slug than the market currently being scanned. Bind books, risk and
+            # forensics to the Evaluation's market so we never KeyError looking
+            # up another market's token in this one's book (and so the leader
+            # recovery can fire on the same tick the six cheap legs finish).
+            order_lm = lm
+            if ev.slug and ev.slug != slug:
+                other = self.markets.get(ev.slug)
+                if other is None or ev.token_id not in other.books:
+                    self._count_exec("CROSS_MARKET_ORDER")
+                    self._engine_refused(ev, f"evaluation for {ev.slug} while scanning {slug}")
+                    continue
+                if other.inflight > 0:
+                    self._count_exec("ORDER_IN_FLIGHT")
+                    continue
+                if self._entry_throttled(other, now):
+                    continue
+                order_lm = other
+                meta = order_lm.meta
+                m = meta.market
+                slug = m.slug
+                asset = m.asset
+                quote_ages = {m.yes_token_id: self.quote_age_ms(m.yes_token_id, now),
+                              m.no_token_id: self.quote_age_ms(m.no_token_id, now)}
+                sts = self.spot_ts.get(asset)
+                spot_age = self.spot_age_ms(asset, now)
+                ctx = {"spot_age": spot_age, "quote_ages": quote_ages}
             # Revalidate against the freshest book right before sending; the
             # book can move between evaluation and submission. Never chase.
-            fresh = lm.books[ev.token_id].to_order_book()
+            if ev.token_id not in order_lm.books:
+                self._count_exec("NO_TOKEN_BOOK")
+                self._engine_refused(ev, f"no book for {ev.token_id} on {slug}")
+                continue
+            fresh = order_lm.books[ev.token_id].to_order_book()
             why = self.engine.revalidate(ev, fresh)
             if why is not None:
                 self._count_exec(f"REVALIDATE_{why.value}")
                 self.decisions.record(ev, now_ms=now, mode=mode, risk_status=risk_status,
                                       override="REVALIDATION", detail=why.value)
-                self._note_signal(ev, lm, now, "SKIP", f"REVALIDATION_{why.value}", ctx)
-                self._skip_log(ev, lm, None, "", f"the freshest book no longer qualifies ({why.value})")
+                self._note_signal(ev, order_lm, now, "SKIP", f"REVALIDATION_{why.value}", ctx)
+                self._skip_log(ev, order_lm, None, "", f"the freshest book no longer qualifies ({why.value})")
                 self._engine_refused(ev, f"the freshest book no longer qualifies ({why.value})")
                 continue
             # the emergency stop, in every mode, immediately before the order exists
@@ -2054,18 +2165,18 @@ class LiveBot:
                 self._count_exec("KILL_SWITCH")
                 self.decisions.record(ev, now_ms=now, mode=mode, risk_status=risk_status,
                                       override="KILL_SWITCH", detail=f"{self.kill_path} ({kill})")
-                self._note_signal(ev, lm, now, "SKIP", "KILL_SWITCH", ctx)
-                self._skip_log(ev, lm, None, "", f"kill switch {self.kill_path} ({kill})")
+                self._note_signal(ev, order_lm, now, "SKIP", "KILL_SWITCH", ctx)
+                self._skip_log(ev, order_lm, None, "", f"kill switch {self.kill_path} ({kill})")
                 self._engine_refused(ev, f"kill switch {self.kill_path} ({kill})")
                 continue
             # the last entry confirmation: every critical condition, re-read now
-            failed, checklist = self._confirm_entry(ev, lm, now, spot_age, quote_ages.get(ev.token_id))
+            failed, checklist = self._confirm_entry(ev, order_lm, now, spot_age, quote_ages.get(ev.token_id))
             if failed is not None:
                 self._count_exec(f"CONFIRM_{failed}")
                 self.decisions.record(ev, now_ms=now, mode=mode, risk_status=risk_status,
                                       override="CONFIRMATION", detail=f"{failed}: {checklist.get(failed)}")
-                self._note_signal(ev, lm, now, "SKIP", f"CONFIRMATION_{failed}", ctx)
-                self._skip_log(ev, lm, None, "", f"pre-send check {failed} failed ({checklist.get(failed)})")
+                self._note_signal(ev, order_lm, now, "SKIP", f"CONFIRMATION_{failed}", ctx)
+                self._skip_log(ev, order_lm, None, "", f"pre-send check {failed} failed ({checklist.get(failed)})")
                 self._engine_refused(ev, f"pre-send check {failed} failed ({checklist.get(failed)})")
                 continue
             self.decisions.record(ev, now_ms=now, mode=mode, risk_status=risk_status)
@@ -2078,9 +2189,9 @@ class LiveBot:
                 self._count_exec("NO_SIDE_VIEW")
                 self._engine_refused(ev, "no side view")
                 continue
-            order.signal_id = self._note_signal(ev, lm, now, "BUY", "", ctx) or ""
+            order.signal_id = self._note_signal(ev, order_lm, now, "BUY", "", ctx) or ""
             self.fair_by_order[order.order_id] = {
-                "slug": slug, "asset": asset, "epoch": lm.epoch, "token_id": ev.token_id,
+                "slug": slug, "asset": asset, "epoch": order_lm.epoch, "token_id": ev.token_id,
                 "side": ev.side, "p_used": ev.p_used, "p_analytic": ev.p_analytic,
                 "p_market": side_view.p_market,
                 "net_edge": ev.net_edge, "confidence": ev.confidence,
@@ -2096,7 +2207,7 @@ class LiveBot:
             book = fresh
             mom = (ev.features or {}).get("momentum") or {}
             self.forensics.open(
-                order.order_id, kind="entry", slug=slug, asset=asset, epoch=lm.epoch, token_id=ev.token_id,
+                order.order_id, kind="entry", slug=slug, asset=asset, epoch=order_lm.epoch, token_id=ev.token_id,
                 market_id=m.slug, condition_id=m.condition_id, side=ev.side, mode=self.mode_label,
                 signal_probability=round(side_view.p_model, 4), market_probability=_r4(side_view.p_market),
                 edge=round(ev.net_edge, 4), spread=_r4(spread),
@@ -2133,7 +2244,7 @@ class LiveBot:
             self.exchange.submit(order, now)
             # the order's WORST case (limit x size) counts against the global exposure
             # budget until it resolves, so markets signalling together cannot overfill it
-            self.risk.on_submit(slug, usdc=order.price * order.size, asset=asset, epoch=lm.epoch)
+            self.risk.on_submit(slug, usdc=order.price * order.size, asset=asset, epoch=order_lm.epoch)
             on_submit = getattr(self.engine, "on_entry_submit", None)
             if callable(on_submit):
                 on_submit(slug, now)
@@ -2145,9 +2256,9 @@ class LiveBot:
                          order.price * order.size, self._portfolio_line())
             self.forensics.stage(order.order_id, "ORDER_SUBMITTED", now, limit_price=order.price)
             self.decisions.order_event("ORDER_SUBMITTED", order.order_id, now, market=slug)
-            lm.submitted += 1
-            lm.inflight += 1
-            lm.last_entry_ms = now
+            order_lm.submitted += 1
+            order_lm.inflight += 1
+            order_lm.last_entry_ms = now
             log.info("SEND  %-26s %-4s %6.2f sh @ %.2f  p %.3f (mkt %.3f)  net edge %+.3f  conf %.2f  "
                      "%s  ofi %+.2f (%+.1f bps)  %5.1fs left",
                      slug, ev.side, ev.size, ev.limit_price, ev.p_used if ev.side == "UP" else 1 - ev.p_used,
@@ -2168,6 +2279,13 @@ class LiveBot:
         m = lm.meta.market
         eng = self.cfg.engine
         mom = getattr(self.engine, "mcfg", None)
+        cheapside_cfg = getattr(self.engine, "scfg", None)
+        cheapside_info = (ev.features or {}).get("cheapside", {})
+        cmc_info = (ev.features or {}).get("cross_market_correlation", {})
+        basket_entry = bool(cheapside_info.get("basket_entry")
+                            or cheapside_info.get("basket_low_buy") or cheapside_info.get("basket_leader_buy"))
+        # Cross-market correlation legs are gated on books + pair EV, not spot shocks.
+        book_priced_entry = basket_entry or bool(cmc_info.get("cmc_leg"))
         max_spot = min(eng.max_spot_age_ms, getattr(mom, "max_spot_age_ms", eng.max_spot_age_ms))
         max_quote = getattr(mom, "max_quote_age_ms", None) or eng.max_book_age_ms
         notional = ev.size * ev.limit_price
@@ -2176,13 +2294,20 @@ class LiveBot:
         # there: without add_to_open the second buy in a market failed RISK_LIMITS (ALREADY_POSITIONED)
         verdict = self.risk.check(m.slug, m.asset, lm.epoch, ev.size * ev.expected_price,
                                   add_to_open=bool(getattr(self.engine, "stacks_positions", False)))
+        min_time_remaining = (cheapside_cfg.portfolio_min_time_remaining_s
+                              if basket_entry and isinstance(self.engine, CheapSideEngine)
+                              else (getattr(mom, "min_time_remaining_s", 0.0) if mom
+                                    else eng.trade_window_end_s))
         checks = {
-            "SPOT_FRESH": (spot_age is not None and spot_age <= max_spot,
+            # The seven-market basket is priced and gated entirely from the two
+            # outcome books. Requiring a crypto spot tick here silently vetoed
+            # otherwise valid cheap and leader orders.
+            "SPOT_FRESH": (book_priced_entry or (spot_age is not None and spot_age <= max_spot),
                            None if spot_age is None else round(spot_age)),
             "BOOK_FRESH": (quote_age is not None and quote_age <= max_quote,
                            None if quote_age is None else round(quote_age)),
             "TIME_REMAINING": ((m.close_ts - now) / 1000.0 >= max(
-                getattr(mom, "min_time_remaining_s", 0.0) if mom else eng.trade_window_end_s,
+                min_time_remaining,
                 (self.strategy_latency.round_trip_ms() + eng.latency_safety_margin_ms) / 1000.0),
                 round((m.close_ts - now) / 1000.0, 1)),
             "BALANCE": (self.exchange.balance >= notional, round(self.exchange.balance, 2)),
@@ -3343,6 +3468,11 @@ class LiveBot:
                     dn = lm.books[m.no_token_id].to_order_book() if m.no_token_id in lm.books else None
                     books[slug] = (up if up is not None and (up.best_bid is not None or up.best_ask is not None) else None,
                                    dn if dn is not None and (dn.best_bid is not None or dn.best_ask is not None) else None)
+                    if hasattr(self.engine, "set_book_age"):
+                        # an engine with its own freshness gate (leader_pair) is told the feed's view of the two books'
+                        # age (the stream's newest message, as quote_age_ms measures it); None = no valid book
+                        ages = [self.quote_age_ms(m.yes_token_id, now), self.quote_age_ms(m.no_token_id, now)]
+                        self.engine.set_book_age(slug, now, max(a for a in ages if a is not None) if all(a is not None for a in ages) else 1e18)
                 asks = requests(now, mkts, books, balance=self.exchange.balance) or ()
             else:
                 asks = requests(now, mkts) or ()
@@ -3415,14 +3545,20 @@ class LiveBot:
                 order = Order(token_id=pr["token_id"], side=Side.BUY,
                               price=round(min(price, ob.best_ask), 2) if ob.best_ask is not None else price, size=float(pr["size"]),
                               tif=TimeInForce.IOC, expected_price=ob.best_ask or price,
+                              fill_at_touch=bool(getattr(self.engine, "fill_at_touch", False)),
                               tag=f"{pr['side']} triangle pair TAKEN at <= {price:.2f} (ask {ob.best_ask})")
             else:                                                 # a maker bid: post-only, resting until the close
                 order = Order(token_id=pr["token_id"], side=Side.BUY, price=price, size=float(pr["size"]),
                               tif=TimeInForce.GTC, expires_ts=float(pr["close_ts"]), expected_price=price, post_only=True,
+                              fill_at_touch=bool(getattr(self.engine, "fill_at_touch", False)),
                               tag=f"{pr['side']} triangle pair, re-placed")
             if self._place_pair(lm, pr["side"], order, pr.get("pair_of", ""), now) and "full_size" in pr:
                 self._pairs_open[order.order_id]["full_size"] = pr["full_size"]
         self._pairs_to_place = keep
+        # _place_pair persists while the restore queue still contains its placeholder;
+        # write again after draining it so the saved file has each restored order once.
+        if not keep:
+            self._persist_positions()
 
     def _place_pair(self, lm: LiveMarket, side: str, order: Order, entry_id: str, now: float,
                     parent: str = "") -> bool:
@@ -4027,6 +4163,19 @@ class LiveBot:
             "pom": eng.get("pom"),
             "copy": eng.get("copy"),
             "cm": {k: eng.get(k) for k in ("cm", "cm_rejects", "cm_core", "cm_lottery", "cm_model")} if "cm_rejects" in eng else None,
+            # Cheapside's multi-market basket plan and trigger diagnostics.
+            "cheapside": eng.get("cheapside"),
+            "cheapside_config": eng.get("cheapside_config"),
+            "cheapside_baskets": eng.get("cheapside_baskets"),
+            "cheapside_projection": eng.get("cheapside_projection"),
+            # CROSS_MARKET_ARB status (None for other engines)
+            "cross_market_arb": eng.get("cross_market_arb"),
+            "cross_market_arb_config": eng.get("cross_market_arb_config"),
+            "cross_market_arb_plans": eng.get("cross_market_arb_plans"),
+            # CROSS_MARKET_CORRELATION status (None for other engines)
+            "cross_market_correlation": eng.get("cross_market_correlation"),
+            "cross_market_correlation_config": eng.get("cross_market_correlation_config"),
+            "cross_market_correlation_plans": eng.get("cross_market_correlation_plans"),
             "orderflow_now": {a: self._of_point(a, now) for a in self.assets},
             "risk": self.risk.snapshot(),
             "orders": {k: (round(v, 4) if isinstance(v, (int, float)) else v) for k, v in lr.items()},
@@ -4111,7 +4260,11 @@ class LiveBot:
     def _market_position(self, lm: LiveMarket) -> dict | None:
         """The Market page's position panel (the user, 2026-10-09): each token's shares, cost (fees in, net of any
         sells) and average price, its value at the best bid, and the market's P&L now (everything sold at the bids,
-        before a sell's fee) and if UP / if DOWN wins. None when the bot never traded the market."""
+        before a sell's fee) and if UP / if DOWN wins. None when the bot never traded the market.
+
+        When the book has no bid, fall back to the same mark equity uses (last mid / cost), so open P&L
+        stays defined and matches portfolio = cash + marked value.
+        """
         m = lm.meta.market
         out, cost, value, held = {}, 0.0, 0.0, False
         for side, tok in (("up", m.yes_token_id), ("down", m.no_token_id)):
@@ -4122,9 +4275,11 @@ class LiveBot:
             live = lm.books.get(tok)
             ob = live.to_order_book() if live is not None else None
             bid = ob.best_bid if ob is not None else None
-            worth = shares * bid if bid is not None else (0.0 if abs(shares) <= 1e-9 else None)
+            mark = bid if bid is not None else (self._mark(tok) if abs(shares) > 1e-9 else None)
+            worth = 0.0 if abs(shares) <= 1e-9 else (None if mark is None else shares * mark)
             out[side] = {"shares": round(shares, 4), "cost": round(spent, 4), "fees": round(float(p.fees_paid), 4) if p else 0.0,
                          "avg": round(spent / shares, 4) if shares > 1e-9 else None, "bid": bid,
+                         "mark": None if mark is None else round(float(mark), 4),
                          "value": None if worth is None else round(worth, 4)}
             cost += spent
             value = None if value is None or worth is None else value + worth
@@ -4132,6 +4287,7 @@ class LiveBot:
             return None
         up, dn = out["up"]["shares"], out["down"]["shares"]
         return {**out, "cost": round(cost, 4), "pnl_now": None if value is None else round(value - cost, 4),
+                "value": None if value is None else round(value, 4),
                 "pnl_up_win": round(up - cost, 4), "pnl_down_win": round(dn - cost, 4)}
 
     @staticmethod
@@ -4444,6 +4600,10 @@ class LiveBot:
                     effective[rkey] = base[rkey]
         self._control_keys = set(values)
         changed = apply_to(effective, self.cfg, self.exchange, **targets)
+        if isinstance(getattr(self, "engine", None), CheapSideEngine):
+            basket_on = bool(self.engine.scfg.portfolio_basket_enabled)
+            self.engine.requires_market_open = basket_on
+            self.engine.requires_strike = not basket_on
         if self.micro_caps is not None:
             # the dashboard steers inside the micro envelope, never out of it
             for line in self.micro_caps.enforce(self.cfg, getattr(self.exchange, "caps", None)):

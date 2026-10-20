@@ -23,6 +23,7 @@ import urllib.parse
 import time
 import traceback
 import uuid
+import shutil
 import subprocess
 import sys
 import webbrowser
@@ -140,7 +141,7 @@ class _BotIndex:
 BOTS = _BotIndex()
 
 
-def _filter_live(payload: dict, chart: str | None, since: int | None = None) -> dict:
+def _filter_live(payload: dict, chart: str | list[str] | None, since: int | dict | None = None) -> dict:
     """Trim the state to what one page needs.
 
     The bot writes every live market's full 5-minute history ten times a
@@ -163,10 +164,11 @@ def _filter_live(payload: dict, chart: str | None, since: int | None = None) -> 
     if "history_meta" not in payload:
         payload["history_meta"] = {slug: len(pts) for slug, pts in hist.items()}
     # the decision marks ride with the chart the same way: only the selected market's
+    charts = chart if isinstance(chart, list) else ([chart] if chart else [])
     marks = payload.get("signal_marks") or {}
-    payload["signal_marks"] = {chart: marks[chart]} if chart and chart in marks else {}
+    payload["signal_marks"] = {slug: marks[slug] for slug in charts if slug in marks}
     shocks = payload.get("shock_marks") or {}
-    payload["shock_marks"] = {chart: shocks[chart]} if chart and chart in shocks else {}
+    payload["shock_marks"] = {slug: shocks[slug] for slug in charts if slug in shocks}
     # Order marks are NOT trimmed: the order list beside the chart shows every
     # market's orders as they are created and filled, and they are small -- a
     # few dozen per market that traded, none for the rest.
@@ -175,11 +177,31 @@ def _filter_live(payload: dict, chart: str | None, since: int | None = None) -> 
         # nothing selected: the page draws no chart, so it needs no history
         payload["price_history"] = {}
         return payload
+    if isinstance(chart, list):
+        selected, partial = {}, {}
+        since_by_slug = since if isinstance(since, dict) else {}
+        for slug in chart:
+            if slug not in hist:
+                continue
+            pts = hist[slug]
+            last = since_by_slug.get(slug)
+            try:
+                last = int(last) if last is not None else None
+            except (TypeError, ValueError):
+                last = None
+            if last is not None:
+                fresh = [p for p in pts if p.get("t", 0) > last]
+                partial[slug] = len(fresh) < len(pts)
+                pts = fresh
+            selected[slug] = pts
+        payload["price_history"] = selected
+        payload["history_partial_by_slug"] = partial
+        return payload
     if chart not in hist:
         payload["price_history"] = {}
         return payload
     pts = hist[chart]
-    if since is not None:
+    if since is not None and not isinstance(since, dict):
         fresh = [p for p in pts if p.get("t", 0) > since]
         # an empty delta for a market we DO have is still {slug: []}, not {}:
         # it means "nothing new, keep what you hold", not "this market is gone"
@@ -203,7 +225,8 @@ def _qs_int(qs: dict[str, list[str]], key: str, default: int) -> int:
 
 
 def _history(page: int = 1, page_size: int = DEFAULT_HISTORY_PAGE_SIZE,
-             view: str = "trips", mode: str = "all", trade_log: Path | None = None) -> dict:
+             view: str = "trips", mode: str = "all", trade_log: Path | None = None,
+             group_5m: bool = False) -> dict:
     """Every fill and settlement the live bot has ever written, across restarts.
 
     The dashboard state is per-process: a restart starts a fresh exchange at
@@ -240,27 +263,85 @@ def _history(page: int = 1, page_size: int = DEFAULT_HISTORY_PAGE_SIZE,
         curve.append({"ts": r.get("ts"), "slug": r.get("slug"),
                       "pnl": round(pnl, 4), "cum": round(realised, 4)})
 
-    # One position is several events -- often two partial entries, a sell and
-    # a settlement -- which in a flat list reads as the same trade repeated.
-    # The default view folds them into round trips, each with its own buy and
-    # sell time; the raw event stream stays available underneath.
+    # The history unit is a complete five-minute market, regardless of how
+    # many positions, fills, or settlement events it contains.
     trips = ledger.round_trips(rows)
-    view = view if view in ("trips", "events") else "trips"
-    if view == "events":
-        rows = [dict(r, corrected_late=True) if (r.get("event") == "settle" and r.get("unresolved")
-                                                 and r.get("slug") in late) else r for r in rows]
-    listed = (trips[::-1] if view == "trips" else rows[::-1])   # newest first
+    by_slug: dict[str, list[dict]] = {}
+    fills_by_slug: dict[str, list[dict]] = {}
+    for trip in trips:
+        by_slug.setdefault(str(trip.get("slug") or ""), []).append(trip)
+    for row in rows:
+        if row.get("event") == "fill":
+            fills_by_slug.setdefault(str(row.get("slug") or ""), []).append(row)
+    settlements: dict[str, list[dict]] = {}
+    for row in settles:
+        settlements.setdefault(str(row.get("slug") or ""), []).append(row)
+    listed = []
+    for slug, group in by_slug.items():
+        group.sort(key=lambda r: r.get("bought_ts") or 0)
+        fills_for_market = fills_by_slug.get(slug, [])
+        buys = [r for r in fills_for_market if str(r.get("action") or "BUY").upper() != "SELL"]
+        sells = [r for r in fills_for_market if str(r.get("action") or "").upper() == "SELL"]
+        settle_rows = settlements.get(slug, [])
+        pnl = sum(float(r.get("pnl") or 0.0) for r in settle_rows) if settle_rows else None
+        bought_ts = min((r.get("ts") for r in buys if r.get("ts") is not None), default=None)
+        closed_ts = max((r.get("ts") for r in settle_rows + sells if r.get("ts") is not None), default=None)
+        sides = sorted({str(r.get("side") or "") for r in fills_for_market})
+        shares = sum(float(r.get("size") or 0) for r in buys)
+        cost = sum(abs(float(r.get("cost") or 0)) for r in buys)
+        fees = sum(float(r.get("fee") or 0) for r in fills_for_market)
+        status = "settled" if settle_rows else "exited" if sells else "open"
+        listed.append({"slug": slug, "side": ", ".join(s for s in sides if s) or "—",
+                       "mode": group[0].get("mode"), "bought_ts": bought_ts,
+                       "closed_ts": closed_ts, "hold_s": None if bought_ts is None or closed_ts is None
+                       else round(max(0, (closed_ts - bought_ts) / 1000), 1),
+                       "shares": round(shares, 4), "cost": round(cost, 4), "fees": round(fees, 4),
+                       "buys": len(buys), "sells": len(sells), "status": status,
+                       "pnl": None if pnl is None else round(pnl, 4),
+                       "settled_ts": closed_ts if settle_rows else None,
+                       "fills": len(fills_for_market), "positions": len(group)})
+    listed.sort(key=lambda r: r.get("bought_ts") or 0, reverse=True)
+    if group_5m:
+        grouped: dict[int | str, list[dict]] = {}
+        for market in listed:
+            match = re.search(r"-(\d{10})$", market["slug"])
+            epoch = int(match.group(1)) if match else market["slug"]
+            grouped.setdefault(epoch, []).append(market)
+        market_windows = []
+        for epoch, markets in grouped.items():
+            numeric_epoch = epoch if isinstance(epoch, int) else None
+            market_windows.append({"epoch": numeric_epoch, "markets": markets,
+                                   "slug": markets[0]["slug"],
+                                   "bought_ts": min((m["bought_ts"] for m in markets if m["bought_ts"] is not None), default=None),
+                                   "fills": sum(m["fills"] for m in markets),
+                                   "positions": sum(m["positions"] for m in markets),
+                                   "status": "open" if any(m["status"] == "open" for m in markets) else "settled",
+                                   "pnl": sum(m["pnl"] for m in markets) if all(m["pnl"] is not None for m in markets) else None,
+                                   "pnl_known": round(sum(m["pnl"] or 0.0 for m in markets), 4),
+                                   "pending_markets": sum(1 for m in markets if m["pnl"] is None)})
+        listed = sorted(market_windows, key=lambda r: r["epoch"] if r["epoch"] is not None
+                        else (r["bought_ts"] or 0) / 1000, reverse=True)
+    view = "markets"
 
     page_size = min(max(page_size, 1), MAX_HISTORY_PAGE_SIZE)
     total_rows = len(listed)
     total_pages = max(1, -(-total_rows // page_size))          # ceil div
     page = min(max(page, 1), total_pages)
     start = (page - 1) * page_size
+    settled_count = len(windows)
+    wins_count = sum(1 for r in windows if _window_pnl(r) > 0)
+    losses_count = sum(1 for r in windows if _window_pnl(r) <= 0)
+    if group_5m:
+        finished = [r for r in listed if all(m["pnl"] is not None for m in r["markets"])]
+        settled_count = len(finished)
+        wins_count = sum(1 for r in finished if sum(m["pnl"] for m in r["markets"]) > 0)
+        losses_count = settled_count - wins_count
     return {
         "fills": len(fills),
-        "settled": len(windows),
-        "wins": sum(1 for r in windows if _window_pnl(r) > 0),
-        "losses": sum(1 for r in windows if _window_pnl(r) <= 0),
+        "settled": settled_count,
+        "wins": wins_count,
+        "losses": losses_count,
+        "fees_total": round(sum(float(r.get("fee") or 0.0) for r in fills), 4),
         "realised_pnl": round(realised, 4),
         "curve": curve,
         "view": view,
@@ -269,7 +350,8 @@ def _history(page: int = 1, page_size: int = DEFAULT_HISTORY_PAGE_SIZE,
         "trips_summary": ledger.summary(trips),
         "rows": listed[start:start + page_size],
         "events_total": len(rows),
-        "trips_total": len(trips),
+        "trips_total": len(listed),
+        "markets_open": sum(1 for r in listed if r.get("status") == "open"),
         "page": page,
         "page_size": page_size,
         "total_rows": total_rows,
@@ -780,7 +862,8 @@ DEFAULT_FILL_MARKETS = 10
 MAX_FILL_MARKETS = 50
 
 
-def market_fills(bot: str = MAIN_BOT, slug: str | None = None, markets: int = DEFAULT_FILL_MARKETS) -> dict | None:
+def market_fills(bot: str = MAIN_BOT, slug: str | None = None, markets: int = DEFAULT_FILL_MARKETS,
+                 slugs: list[str] | None = None) -> dict | None:
     """Every fill of one market (``slug``), or of the newest ``markets`` markets, oldest first, with each
     settled market's outcome: the market page's fill ledger. Whole markets only, so the page's running
     "held after" and "overall after this fill" columns always start from a market's first fill."""
@@ -788,7 +871,10 @@ def market_fills(bot: str = MAIN_BOT, slug: str | None = None, markets: int = DE
     if paths is None:
         return None
     fills, outcomes = FILLS.load(Path(paths[1]))
-    if slug:
+    if slugs:
+        keep = set(slugs)
+        rows = [f for f in fills if f.get("slug") in keep]
+    elif slug:
         rows = [f for f in fills if f.get("slug") == slug]
     else:
         n = min(max(markets, 1), MAX_FILL_MARKETS)
@@ -1325,9 +1411,39 @@ def _pm2_apps() -> list[dict]:
         args = env.get("args") or []
         args = " ".join(args) if isinstance(args, list) else str(args)
         m = re.search(r"--data-tag\s+(\S+)", args)
+        real = bool(re.search(r"(^|\s)--live(\s|$)", args) or re.search(r"--mode\s+(shadow|micro-live|live)(\s|$)", args))
         apps.append({"name": str(a.get("name") or ""), "status": str(env.get("status") or ""), "tag": m.group(1) if m else None,
-                     "cwd": str(env.get("pm_cwd") or "")})
+                     "cwd": str(env.get("pm_cwd") or ""), "live": real})
     return apps
+
+
+def fresh_paths(tag: str) -> list[Path]:
+    """The files a FRESH restart of a pm2 bot removes: every ``data/<base>.<tag>.json[l]`` the bot writes (its ledger,
+    open positions, state, decisions, forensics, markouts, signal outcomes, strikes, a strategy's own state file) and
+    its chart history directory ``data/live_state.<tag>.history``. Nothing untagged (data/earnings.jsonl, data/charts/,
+    another bot's files) can match: the tag sits between two dots and is validated."""
+    if not _TAG_RE.match(tag or ""):
+        return []
+    d = LIVE_STATE.parent
+    out = [f for f in d.glob(f"*.{tag}.json") if f.is_file()] + [f for f in d.glob(f"*.{tag}.jsonl") if f.is_file()]
+    hist = d / f"live_state.{tag}.history"
+    if hist.is_dir():
+        out.append(hist)
+    return sorted(out)
+
+
+def _remove_fresh(tag: str) -> list[str]:
+    removed = []
+    for f in fresh_paths(tag):
+        try:
+            if f.is_dir():
+                shutil.rmtree(f)
+            else:
+                f.unlink()
+            removed.append(f.name)
+        except OSError:
+            log.exception("fresh restart: could not remove %s", f)
+    return removed
 
 
 def _ecosystem_apps() -> list[dict]:
@@ -1365,9 +1481,14 @@ def _resolve_pm2_bot(bot: str) -> tuple[dict | None, dict | None, str]:
     return (live[0] if live else None), (eco[0] if eco else None), ""
 
 
-def pm2_control(action: str, bot: str) -> dict:
+def pm2_control(action: str, bot: str, fresh: bool = False) -> dict:
     """Start / stop / restart a pm2 bot by its data tag. ``pm2 start <ecosystem> --only <name>`` brings an app pm2 has
-    forgotten (deleted) back with its current config; a stopped app pm2 still lists is resumed by name."""
+    forgotten (deleted) back with its current config; a stopped app pm2 still lists is resumed by name.
+
+    ``fresh`` (the Restart modal's second choice, the user 2026-10-13): the bot is stopped, every tagged data file it
+    wrote is removed (``fresh_paths``) and it is started again -- an empty ledger, no restored positions or strategy
+    state, the ecosystem file's initial balance. Refused for a real-money app (--live / --mode shadow|micro-live|live):
+    its ledger is the record of real fills and is never deleted from here."""
     if action not in ("start", "stop", "restart"):
         return {"ok": False, "reason": "unknown action"}
     app, eco, why = _resolve_pm2_bot(bot)
@@ -1379,6 +1500,18 @@ def pm2_control(action: str, bot: str) -> dict:
         return {"ok": True, "reason": f"{name} is already running", "running": True, "app": name}
     if action in ("stop", "restart") and app is None:
         return {"ok": False, "reason": f"{name} is not in pm2's list", "running": False, "app": name}
+    removed: list[str] = []
+    if fresh and action in ("start", "restart"):
+        if app is not None and app.get("live"):
+            return {"ok": False, "reason": f"{name} trades real money: a fresh restart (deleting its ledger) is refused here",
+                    "running": running, "app": name}
+        if running:
+            code, out = _pm2("stop", name)
+            if code != 0:
+                return {"ok": False, "reason": f"pm2 stop {name} failed (exit {code}): {out.strip()[-300:]}",
+                        "running": running, "app": name}
+        removed = _remove_fresh(bot)
+        log.warning("fresh %s of bot %s (%s): removed %s", action, bot, name, ", ".join(removed) or "nothing")
     if action == "stop":
         argv = ["stop", name]
     elif action == "restart":
@@ -1393,8 +1526,10 @@ def pm2_control(action: str, bot: str) -> dict:
     now_running = bool(after and after["status"] == "online")
     log.warning("pm2 %s for bot %s (%s): %s", " ".join(argv), bot, "ok" if ok else f"exit {code}", "online" if now_running else "stopped")
     tail = "\n".join(line for line in out.strip().splitlines()[-4:])
-    return {"ok": ok, "reason": "" if ok else f"pm2 {' '.join(argv)} failed (exit {code}): {tail[-300:]}",
-            "running": now_running, "app": name, "pm2": tail[-600:]}
+    reason = "" if ok else f"pm2 {' '.join(argv)} failed (exit {code}): {tail[-300:]}"
+    if ok and fresh and action in ("start", "restart"):
+        reason = f"{name} started fresh: removed {len(removed)} file(s) ({', '.join(removed) or 'none'})"
+    return {"ok": ok, "reason": reason, "running": now_running, "app": name, "pm2": tail[-600:], "removed": removed}
 
 
 class _AccountCache:
@@ -1889,7 +2024,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._ws_send(sock_lock, ws.close_frame())
 
     @staticmethod
-    def _live_payload(chart: str | None, since: int | None, state_path: Path | None = None,
+    def _live_payload(chart: str | list[str] | None, since: int | dict | None, state_path: Path | None = None,
                       bot: str = MAIN_BOT) -> dict | None:
         """The live state trimmed for one viewer, or None if it is unreadable.
 
@@ -1910,7 +2045,17 @@ class Handler(BaseHTTPRequestHandler):
         # which bot this is: a frame from the socket of a bot the page has just
         # switched away from must not be drawn over the new one
         payload["bot"] = bot
-        if "price_history" not in payload:
+        if isinstance(chart, list):
+            # The current bot stores histories in per-market files. A state
+            # snapshot may still contain an empty/stale `price_history` key,
+            # so batch chart requests must read each requested file directly.
+            history = payload.get("price_history") or {}
+            for slug in chart:
+                pts = read_points(state_path, slug)
+                if pts is not None:
+                    history[slug] = pts
+            payload["price_history"] = history
+        elif "price_history" not in payload:
             # the bot keeps chart points out of the state (history_store.py):
             # read only the market this viewer draws
             pts = read_points(state_path, chart) if chart else None
@@ -1951,13 +2096,19 @@ class Handler(BaseHTTPRequestHandler):
             qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             page = _qs_int(qs, "page", 1)
             page_size = _qs_int(qs, "page_size", DEFAULT_HISTORY_PAGE_SIZE)
-            paths = bot_paths((qs.get("bot") or [MAIN_BOT])[0])
+            bot_id = (qs.get("bot") or [MAIN_BOT])[0]
+            paths = bot_paths(bot_id)
             if paths is None:
                 self._json({"error": "unknown bot"}, 404)
                 return
             self._json(_history(page, page_size,
                                 view=(qs.get("view") or ["trips"])[0],
-                                mode=(qs.get("mode") or ["all"])[0], trade_log=paths[1]))
+                                mode=(qs.get("mode") or ["all"])[0], trade_log=paths[1],
+                                group_5m=("cheapside" in bot_id.lower()
+                                          or "crossmarketarb" in bot_id.lower()
+                                          or "cross_market_arb" in bot_id.lower()
+                                          or "crossmarketcorr" in bot_id.lower()
+                                          or "cross_market_correlation" in bot_id.lower())))
         elif path == "/api/orders":
             # the newest orders across every market (the market page's order list)
             qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
@@ -1968,10 +2119,12 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self._json(out)
         elif path == "/api/fills":
-            # one market's fills, or the newest markets' (the market page's fill ledger)
+            # one market's fills, an explicit set of markets, or the newest markets' fill ledger
             qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            slugs = [s for s in (qs.get("slugs") or [""])[0].split(",") if s]
             out = market_fills((qs.get("bot") or [MAIN_BOT])[0] or MAIN_BOT,
                                slug=(qs.get("slug") or [""])[0] or None,
+                               slugs=slugs or None,
                                markets=_qs_int(qs, "markets", DEFAULT_FILL_MARKETS))
             if out is None:
                 self._json({"error": "unknown bot"}, 404)
@@ -1993,10 +2146,16 @@ class Handler(BaseHTTPRequestHandler):
             # Served read-only so the dashboard can show it without the two
             # processes needing to know about each other.
             qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
-            chart = (qs.get("chart") or [None])[0]
+            charts_raw = (qs.get("charts") or [None])[0]
+            if charts_raw:
+                chart = list(dict.fromkeys(x for x in charts_raw.split(",")[:32] if x))
+            else:
+                chart = (qs.get("chart") or [None])[0]
+            since_raw = (qs.get("since") or [None])[0]
             try:
-                since = int((qs.get("since") or [None])[0])
-            except (TypeError, ValueError):
+                since = (json.loads(since_raw) if isinstance(chart, list) and since_raw
+                         else int(since_raw))
+            except (TypeError, ValueError, json.JSONDecodeError):
                 since = None
             bot = (qs.get("bot") or [MAIN_BOT])[0] or MAIN_BOT
             paths = bot_paths(bot)
@@ -2062,10 +2221,13 @@ class Handler(BaseHTTPRequestHandler):
             action = path.rsplit("/", 1)[-1]
             body = self._body()
             bot = str(body.get("bot") or MAIN_BOT)
+            fresh = bool(body.get("fresh"))
             if bot != MAIN_BOT:
-                # a pm2 bot: started, stopped or restarted through pm2 by its data tag
-                out = pm2_control(action, bot)
+                # a pm2 bot: started, stopped or restarted through pm2 by its data tag; "fresh" removes its data first
+                out = pm2_control(action, bot, fresh=fresh)
                 self._json(out, 200 if out.get("ok") else 400)
+            elif fresh:
+                self._json({"ok": False, "reason": "a fresh restart is offered for pm2 bots only: the main bot's ledger is untagged"}, 400)
             elif action == "start":
                 self._json(BOT.start(body))
             elif action == "stop":

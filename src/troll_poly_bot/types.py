@@ -113,6 +113,9 @@ class Order:
     #: a resting order that must stay a MAKER: never filled as a taker on arrival (the real venue's post_only, which
     #: execution/polymarket.py sets on every resting order; the paper engine refuses a crossing one the same way)
     post_only: bool = False
+    #: paper-only opt-in: let a resting BUY fill when the best ask touches its limit (<=),
+    #: instead of requiring the ask to trade strictly through it (<).
+    fill_at_touch: bool = False
     # --- the order's own timeline (epoch ms, 0 = not reached) --------------
     #: T5: the request left for the venue (live: right before POST; paper:
     #: the simulated departure, i.e. the decision)

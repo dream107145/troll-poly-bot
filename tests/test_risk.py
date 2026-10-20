@@ -63,12 +63,41 @@ def test_daily_loss_and_drawdown_halt():
     rm.on_fill("a", "BTC", 1, "UP", 5.0, 10.0)
     rm.on_settle("a", -6.0)
     assert not rm.halted().ok and "daily" in rm.halted().detail
+    # Drawdown vs 24h-ago balance (falls back to starting_balance), not peak.
     rm2 = _rm(max_daily_loss_usdc=100.0, max_drawdown_usdc=5.0)
     rm2.on_fill("a", "BTC", 1, "UP", 5.0, 10.0)
     rm2.on_settle("a", +10.0)
     rm2.on_fill("b", "BTC", 2, "UP", 5.0, 10.0)
     rm2.on_settle("b", -6.0)
-    assert not rm2.halted().ok and "drawdown" in rm2.halted().detail
+    assert rm2.halted().ok
+    assert rm2.drawdown == pytest.approx(-4.0)  # initial 100 → equity 104
+    rm3 = _rm(max_daily_loss_usdc=100.0, max_drawdown_usdc=5.0)
+    rm3.on_fill("a", "BTC", 1, "UP", 5.0, 10.0)
+    rm3.on_settle("a", -6.0)  # equity 94 → drawdown 6
+    assert not rm3.halted().ok and "drawdown" in rm3.halted().detail
+    assert rm3.drawdown == pytest.approx(6.0)
+
+
+def test_drawdown_uses_balance_24h_ago():
+    import time as _time
+    from troll_poly_bot.risk.limits import DRAWDOWN_LOOKBACK_S
+
+    now = _time.time()
+    rm = _rm(max_daily_loss_usdc=1000.0, max_drawdown_usdc=5.0)
+    # Replace seed so the only sample 24h ago is 150; current marked is 140.
+    rm._balance_history = [(now - DRAWDOWN_LOOKBACK_S, 150.0)]
+    rm._last_balance_sample_ts = now - DRAWDOWN_LOOKBACK_S
+    rm.note_balance(140.0, now_s=now)
+    assert rm.balance_24h_ago(now_s=now) == pytest.approx(150.0)
+    assert rm.drawdown == pytest.approx(10.0)  # 150 - 140
+    assert not rm.halted(now_s=now).ok
+    assert "drawdown" in rm.halted(now_s=now).detail
+    # Before 24h of history, reference stays at initial bankroll.
+    rm2 = _rm(max_daily_loss_usdc=1000.0, max_drawdown_usdc=50.0)
+    rm2.note_balance(120.0, now_s=now)
+    assert rm2.balance_24h_ago(now_s=now + 3600.0) == pytest.approx(100.0)
+    assert rm2.current_balance == pytest.approx(120.0)
+    assert rm2.balance_24h_ago(now_s=now) - rm2.current_balance == pytest.approx(-20.0)
 
 
 def test_size_never_grows_after_a_loss():

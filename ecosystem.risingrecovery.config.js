@@ -52,16 +52,44 @@ module.exports = {
         TPB_RTR_OPT_PRICE_MAX: '0.90',
         TPB_RTR_OPT_EVAL_INTERVAL_S: '6',
         TPB_RTR_OPT_MOM_INTERVAL_S: '5',
-        TPB_RTR_OPT_MOM_LOW: '0.35',
-        TPB_RTR_OPT_MOM_HIGH: '0.65',
-        TPB_RTR_OPT_MOM_TARGET: '0.65',
-        TPB_RTR_OPT_MOM_SHARES: '5',             // momentum phase (the user 10-13): a token rising in 0.35..0.65 is bought 5 sh every 5 s (0 = optimizer)
+        // 10-14 the user: "if the lower token starts rising, buy it. After 3 s, if it still rises wait; if it stopped or falls,
+        // buy top side tokens. Lower limit 0.15 instead of 0.35" (rtr.opt_mom_* on the Variables page)
+        TPB_RTR_OPT_MOM_LOW: '0.15',
+        // 10-14 the user: "in 0.4-0.6 buy the rising token +3c above the last purchase price; out of the range reset the
+        // last price to 0.35 -- to prevent too many purchases in the range" (rtr.opt_mom_ladder_* on the page)
+        TPB_RTR_OPT_MOM_LADDER_ENABLED: '1',
+        TPB_RTR_OPT_MOM_LADDER_LOW: '0.40',
+        TPB_RTR_OPT_MOM_LADDER_HIGH: '0.60',
+        TPB_RTR_OPT_MOM_LADDER_RESET: '0.35',
+        TPB_RTR_OPT_MOM_LOWER_ONLY: '1',
+        TPB_RTR_OPT_MOM_BUY_AT_START: '1',
+        TPB_RTR_OPT_MOM_CHECK_S: '3',
+        TPB_RTR_OPT_MOM_CHECK_MIN_RISE: '0.01',
+        TPB_RTR_OPT_MOM_COVER: '1',
+        TPB_RTR_OPT_MOM_COVER_RATIO: '1.0',
+        TPB_RTR_OPT_MOM_HIGH: '0.80',
+        TPB_RTR_OPT_MOM_TARGET: '0.80',
+        TPB_RTR_OPT_MOM_SHARES: '5',             // momentum phase (the user 10-13): a token rising in 0.35..0.65 is bought 5 sh (0 = optimizer)
+        // 10-14 the user: "when a token rises between 0.35-0.65, buy it every 3c increase, not every 5 s"; later 10-14:
+        // "buy rising tokens from 0.35 to 0.8 for each 5c increase" -> zone 0.35..0.80, target 0.80, step 3c (the user: 'oh, every 3c')
+        TPB_RTR_OPT_MOM_TRIGGER: 'step',
+        TPB_RTR_OPT_MOM_STEP: '0.03',
         TPB_RTR_OPT_OPPOSITE_DELAY_S: '5',       // no opposite-token buy within 5 s of the first buy
         TPB_RTR_OPT_OPPOSITE_RATIO: '0.5',       // the opposite token is held at most 1/2 of the leader's shares
         TPB_RTR_OPT_QUANTITIES: '5,10,15,20',
         TPB_RTR_OPT_MIN_IMPROVEMENT: '0.05',
         TPB_RTR_OPT_TIE_EPS: '0.01',
-        TPB_RTR_OPT_REQUIRE_POSITIVE: 'both',   // the user 10-13: no pairs of the high-priced token; buy the other token only if BOTH settlement PnLs end > 0
+        TPB_RTR_OPT_REQUIRE_POSITIVE: 'both',
+        // 10-14 the user: "mix maker fill and taker fill when buying tokens" -> half of every opt buy rests as a post-only
+        // bid (fee-free if filled) for up to 10 s, the other half is taken at once (rtr.opt_maker_* on the Variables page)
+        // 10-14 the user: "if the token price changes quickly use taker mode, else maker mode" -> the whole buy is taken when
+        // the mid moved 2c+ over the last second, else it rests as a post-only bid (rtr.opt_exec_mode / rtr.opt_speed_*)
+        // 10-14 the user: "do not use maker fill, use only taker fill" -> every opt buy is taken (speed / mixed stay as options)
+        TPB_RTR_OPT_EXEC_MODE: 'taker',
+        TPB_RTR_OPT_SPEED_WINDOW_MS: '1000',
+        TPB_RTR_OPT_SPEED_THRESHOLD: '0.02',
+        TPB_RTR_OPT_MAKER_FRACTION: '0.5',
+        TPB_RTR_OPT_MAKER_REST_S: '10',   // the user 10-13: no pairs of the high-priced token; buy the other token only if BOTH settlement PnLs end > 0
         // 16:0x the user chose option 2: the same rules at half the size, the loss limits (daily 20, drawdown 60) kept
         TPB_RTR_SPOT_INIT_SHARES: '10',
         TPB_RTR_SPOT_REV_SHARES: '5',         // 50 % of 5 is under the venue's 5-share minimum: the minimum
@@ -70,8 +98,10 @@ module.exports = {
         TPB_RTR_SPOT_LEADER_MID: '0.75',
         TPB_RTR_SPOT_LEADER_TARGET_USDC: '5',
         TPB_RTR_SPOT_NEAR_STRIKE_PCT: '0.05',
-        TPB_RTR_SPOT_MAX_SHARES: '50',
-        TPB_RTR_SPOT_MAX_COST_USDC: '50',
+        // 10-14 the user: balance 500, 150 USDC a market, daily loss 150 (both paper bots); the per-outcome share cap
+        // raised so the cost cap is the binding one
+        TPB_RTR_SPOT_MAX_SHARES: '300',
+        TPB_RTR_SPOT_MAX_COST_USDC: '150',
         TPB_RTR_SPOT_MIN_INTERVAL_S: '1',
         TPB_RTR_SPOT_SLIPPAGE_ALLOWANCE: '0.01',
         // 14:5x the user: orders again until filled (want queue), the lower-priced token only while the market's
@@ -132,9 +162,23 @@ module.exports = {
         TPB_RTR_MAX_MARKET_FILLS: '40',
         // the user, 16:3x: "if expected P&L is negative, make positive to buy high price token" -- when the market's P&L
         // if the favourite (mid >= 0.55) wins is under +0.10, the favourite is bought until it is (limits apply)
+        // 10-13 21:xx the user (OPT mode too): "if the price is in 0.6-0.8 and the settlement PnL of the leader is negative,
+        // buy leader tokens and make the settlement PnL +$5. Do not change the lower-price token purchase behaviour" ->
+        // every pass, the higher-priced token with its ask in 0.60..0.80 and a negative P&L should it win is bought up to +5
+        // (rtr.fix_* / rtr.high_win_target_usdc on the Variables page)
+        // 10-14 the user: the fix only with <= 210 s left, only while the favourite rises in 0.50..0.80; the cheap-token hedge
+        // (ask <= 0.20) lifts a negative worst case while the best case stays >= +2
         TPB_RTR_FIX_HIGH: '1',
+        TPB_RTR_FIX_MIN_ASK: '0.50',
+        TPB_RTR_FIX_MAX_ASK: '0.80',
+        TPB_RTR_FIX_MAX_LEFT_S: '210',
+        TPB_RTR_FIX_REQUIRE_RISING: '1',
+        TPB_RTR_FIX_RISE_WINDOW_S: '5',
+        TPB_RTR_FIX_MIN_RISE: '0.01',
+        TPB_RTR_OPT_HEDGE_ENABLED: '1',
+        TPB_RTR_OPT_HEDGE_MIN_BEST_USDC: '2',
         TPB_RTR_HIGH_MIN_MID: '0.55',
-        TPB_RTR_HIGH_WIN_TARGET_USDC: '0.10',
+        TPB_RTR_HIGH_WIN_TARGET_USDC: '5',
         // the user, 16:4x: "if current or predicted P&L is positive, do not buy lower price token ... buy under 0.2 tokens to
         // minimize max loss of worst case" -- positive state: no momentum buys of the lower-priced token; it is bought only
         // under 0.20 as a hedge sized to even out the two outcomes (the favourite's outcome kept >= +0.10)
@@ -186,21 +230,25 @@ module.exports = {
         // high shares only as post-only bids at the bid), then the market is done; 1 = equal pairs
         TPB_RTR_HIGH_RATIO: '2',
         // 5. the target and the limits
-        TPB_RTR_TARGET_PROFIT_USDC: '0.20',
-        TPB_RTR_MAX_MARKET_COST_USDC: '100',
+        // 10-14 the user: "if buying a certain token can make pairs under 0.95 in total, calculate the amount and buy it;
+        // if the locked PnL is over $5, lock buying" -> opt mode: the pair buy, and the lock at a worst outcome of +5
+        TPB_RTR_TARGET_PROFIT_USDC: '5',
+        TPB_RTR_OPT_PAIR_ENABLED: '1',
+        TPB_RTR_OPT_PAIR_THRESHOLD: '0.95',
+        TPB_RTR_MAX_MARKET_COST_USDC: '150',
         TPB_RTR_MAX_MARKET_LOSS_USDC: '10',
-        TPB_RTR_MAX_TOTAL_COST_USDC: '200',
+        TPB_RTR_MAX_TOTAL_COST_USDC: '450',
         TPB_RTR_ASSETS: 'BTC',
-        TPB_RTR_MAX_TOTAL_EXPOSURE_USDC: '200',
-        TPB_RTR_MAX_DAILY_LOSS_USDC: '100',      // the user 10-13 16:37: daily loss 100
-        TPB_RTR_MAX_ORDER_USDC: '100',
+        TPB_RTR_MAX_TOTAL_EXPOSURE_USDC: '450',
+        TPB_RTR_MAX_DAILY_LOSS_USDC: '150',      // the user 10-14: daily loss 150 (was 100, 10-13 16:37)
+        TPB_RTR_MAX_ORDER_USDC: '150',
         TPB_RTR_MAX_SIMULTANEOUS_POSITIONS: '4',
         TPB_RTR_FAST_FEED: '0',
         // this bot's own loss limits, not the Settings page's shared paper rows
         TPB_CONTROLS_IGNORE: 'risk.max_drawdown_usdc,risk.max_daily_loss_usdc',
       },
-      args: '-m troll_poly_bot --balance 200 --mode paper --scenario calibrated --strategy rising_recovery --assets BTC '
-          + '--max-order-usdc 100 --max-open-usdc 200 --max-daily-loss 100 --risk-daily-loss 100 --max-drawdown 60 '
+      args: '-m troll_poly_bot --balance 500 --mode paper --scenario calibrated --strategy rising_recovery --assets BTC '
+          + '--max-order-usdc 150 --max-open-usdc 450 --max-daily-loss 150 --risk-daily-loss 150 --max-drawdown 300 '
           + '--data-tag risingrecovery-paper --keep-history --log-level INFO' },
   ],
 };

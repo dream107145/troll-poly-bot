@@ -99,6 +99,18 @@ function applyOverlayLayout() {
 const TZ_LABEL = 'GMT+9';
 const TZ_SHIFT_MS = 9 * 3600 * 1000;
 const pad2 = (n) => String(n).padStart(2, '0');
+function rangeForEpoch(epoch) {
+  if (!Number.isFinite(Number(epoch))) return '5m window';
+  const start = Number(epoch) * 1000;
+  const left = fmt.clock(start), right = fmt.clock(start + WINDOW_S * 1000);
+  const end = left.slice(0, 14) === right.slice(0, 14) ? right.slice(14, 16) : right.slice(0, 16);
+  return `${left.slice(0, 16)}-${end} ${TZ_LABEL}`;
+}
+function rangeForSlug(slug, fallbackTs) {
+  const match = String(slug || '').match(/-(\d{10})$/);
+  return match ? rangeForEpoch(Number(match[1]))
+    : Number.isFinite(Number(fallbackTs)) ? rangeForEpoch(Math.floor(Number(fallbackTs) / 300000) * 300) : '5m window';
+}
 function tzParts(ms) {
   const d = new Date(Number(ms) + TZ_SHIFT_MS);
   return {
@@ -249,12 +261,12 @@ function botArgs() {
   };
 }
 
-async function control(action) {
+async function control(action, extra) {
   const buttons = ['#btn-start', '#btn-stop', '#btn-restart'];
   buttons.forEach((b) => { $(b).disabled = true; });
   notice('');
   try {
-    const res = await post(`/api/bot/${action}`, { ...botArgs(), bot: state.botId });
+    const res = await post(`/api/bot/${action}`, { ...botArgs(), bot: state.botId, ...(extra || {}) });
     if (res.reason) notice(res.reason);
     if (state.botId !== 'main' && typeof res.running === 'boolean') {
       // pm2 answered: show its state now rather than waiting for the state file to go stale
@@ -1127,6 +1139,322 @@ function pickerMarkets() {
 
 let pickerSig = '';
 
+/* ── Skip trading (Market page): toggle assets the bot must not buy ────────
+   Persists via data/controls.json as <strategy>.exclude_assets; the bot
+   re-reads within ~2s. CMC / CMA / spot-lag family all honour asset_ok(). */
+const SKIP_ASSETS_FALLBACK = ['BTC', 'ETH', 'SOL', 'XRP', 'DOGE', 'BNB', 'HYPE'];
+let skipChipSig = '';
+let skipSaving = false;
+
+function skipControlKey() {
+  const s = (state.live && state.live.strategy) || '';
+  if (s === 'cross_market_correlation') return 'cmc.exclude_assets';
+  if (s === 'cross_market_arb') return 'cma.exclude_assets';
+  if (s === 'cheapside') return 'spot_lag.exclude_assets';
+  if (s === 'leader_pair') return 'spot_lag.exclude_assets';
+  return 'spot_lag.exclude_assets';
+}
+
+function skipControlScope() {
+  const scope = state.live && state.live.controls && state.live.controls.scope;
+  if (scope === 'live' || scope === 'paper') return scope;
+  const mode = String((state.live && state.live.mode) || '');
+  return (mode.includes('live') && !mode.includes('paper')) ? 'live' : 'paper';
+}
+
+function parseAssetList(raw) {
+  return String(raw || '')
+    .split(',')
+    .map((x) => x.trim().toUpperCase())
+    .filter(Boolean);
+}
+
+function skipAssetsKnown() {
+  const fromMkts = [...new Set((state.live.live_markets || [])
+    .map((m) => String(m.asset || (m.slug || '').split('-')[0] || '').toUpperCase())
+    .filter(Boolean))];
+  if (fromMkts.length) return fromMkts.sort();
+  const started = parseAssetList(state.live.controls && state.live.controls.restart_only
+    && state.live.controls.restart_only.assets);
+  if (started.length) return started.sort();
+  return SKIP_ASSETS_FALLBACK.slice();
+}
+
+function skipAssetsActive() {
+  const key = skipControlKey();
+  const running = (state.live.controls && state.live.controls.values) || {};
+  if (key in running) return new Set(parseAssetList(running[key]));
+  // Until the bot reports the new tunable, fall back to stored controls / spot_lag.
+  const stored = (CTRL.stored && CTRL.stored[skipControlScope()]) || {};
+  if (key in stored) return new Set(parseAssetList(stored[key]));
+  if ('spot_lag.exclude_assets' in running) {
+    return new Set(parseAssetList(running['spot_lag.exclude_assets']));
+  }
+  return new Set();
+}
+
+function renderSkipTokens() {
+  const host = $('#skip-tokens');
+  const chips = $('#skip-token-chips');
+  const status = $('#skip-tokens-status');
+  if (!host || !chips) return;
+  if (!state.live) { host.hidden = true; skipChipSig = ''; return; }
+  host.hidden = false;
+  const assets = skipAssetsKnown();
+  const skipped = skipAssetsActive();
+  const lowerOnly = lowerSideAssetsActive();
+  const key = skipControlKey();
+  const sig = JSON.stringify([assets, [...skipped].sort(), [...lowerOnly].sort(), key, skipSaving]);
+  if (sig === skipChipSig) return;
+  skipChipSig = sig;
+  chips.innerHTML = '';
+  assets.forEach((asset) => {
+    const on = skipped.has(asset);
+    const lowOn = lowerOnly.has(asset);
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'chip skip-chip';
+    b.dataset.asset = asset;
+    b.dataset.skip = on ? '1' : '0';
+    b.title = lowOn
+      ? `${asset}: lower-side only — click skip to exclude entirely (clears lower-side)`
+      : (on
+        ? `${asset}: skipped — click to allow trading again`
+        : `${asset}: click to skip trading`);
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    b.innerHTML = on ? `${asset}<span class="skip-tag">skip</span>` : asset;
+    b.disabled = skipSaving;
+    b.addEventListener('click', () => toggleSkipAsset(asset));
+    chips.appendChild(b);
+  });
+  const list = [...skipped].sort();
+  status.textContent = skipSaving
+    ? 'Saving…'
+    : (list.length
+      ? `Skipping ${list.join(', ')} · applies within ~2s (${key})`
+      : `No tokens skipped · ${key}`);
+}
+
+async function toggleSkipAsset(asset) {
+  if (skipSaving || !state.live) return;
+  const key = skipControlKey();
+  const scope = skipControlScope();
+  const next = skipAssetsActive();
+  if (next.has(asset)) next.delete(asset);
+  else next.add(asset);
+  const value = [...next].sort().join(',');
+  // Skip and lower-side-only are mutually exclusive.
+  const lowKey = lowerSideControlKey();
+  const lowNext = lowerSideAssetsActive();
+  const clearedLow = lowNext.delete(asset);
+  const values = { [key]: value || 'none' };
+  if (clearedLow && lowKey) values[lowKey] = [...lowNext].sort().join(',') || 'none';
+  skipSaving = true;
+  skipChipSig = '';
+  lowerSideChipSig = '';
+  renderSkipTokens();
+  renderLowerSideTokens();
+  try {
+    const res = await post('/api/controls', { scope, values });
+    if (!res.ok) {
+      notice(res.errors ? res.errors.join('; ') : 'Could not save skip list', true);
+    } else {
+      CTRL.stored = res.stored || CTRL.stored;
+      // Optimistic: mirror into the live controls blob so the chips update before the next poll.
+      if (state.live.controls) {
+        state.live.controls.values = state.live.controls.values || {};
+        Object.assign(state.live.controls.values, values);
+      }
+      notice(value ? `Skipping ${value}` : 'Skip list cleared', false);
+    }
+  } catch (err) {
+    notice(String(err && err.message || err), true);
+  } finally {
+    skipSaving = false;
+    skipChipSig = '';
+    lowerSideChipSig = '';
+    renderSkipTokens();
+    renderLowerSideTokens();
+  }
+}
+
+/* ── Lower-side only (Market page, CMC): asset may only be the cheaper pair leg ─ */
+const LOWER_SIDE_KEY = 'cmc.lower_side_only_assets';
+let lowerSideChipSig = '';
+let lowerSideSaving = false;
+
+function lowerSideControlKey() {
+  const s = (state.live && state.live.strategy) || '';
+  return s === 'cross_market_correlation' ? LOWER_SIDE_KEY : null;
+}
+
+function lowerSideAssetsActive() {
+  const key = lowerSideControlKey();
+  if (!key) return new Set();
+  const running = (state.live.controls && state.live.controls.values) || {};
+  if (key in running) return new Set(parseAssetList(running[key]));
+  const stored = (CTRL.stored && CTRL.stored[skipControlScope()]) || {};
+  if (key in stored) return new Set(parseAssetList(stored[key]));
+  return new Set();
+}
+
+function renderLowerSideTokens() {
+  const host = $('#lower-side-tokens');
+  const chips = $('#lower-side-token-chips');
+  const status = $('#lower-side-tokens-status');
+  if (!host || !chips) return;
+  const key = lowerSideControlKey();
+  if (!state.live || !key) { host.hidden = true; lowerSideChipSig = ''; return; }
+  host.hidden = false;
+  const assets = skipAssetsKnown();
+  const active = lowerSideAssetsActive();
+  const skipped = skipAssetsActive();
+  const sig = JSON.stringify([assets, [...active].sort(), [...skipped].sort(), key, lowerSideSaving]);
+  if (sig === lowerSideChipSig) return;
+  lowerSideChipSig = sig;
+  chips.innerHTML = '';
+  assets.forEach((asset) => {
+    const on = active.has(asset);
+    const skippedOn = skipped.has(asset);
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'chip skip-chip lower-side-chip';
+    b.dataset.asset = asset;
+    b.dataset.skip = on ? '1' : '0';
+    b.title = skippedOn
+      ? `${asset}: skipped — click lower-side to allow as cheap leg only (clears skip)`
+      : (on
+        ? `${asset}: lower-side only — click to allow either leg`
+        : `${asset}: click to restrict to the cheaper pair leg only`);
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    b.innerHTML = on ? `${asset}<span class="skip-tag">low</span>` : asset;
+    b.disabled = lowerSideSaving;
+    b.addEventListener('click', () => toggleLowerSideAsset(asset));
+    chips.appendChild(b);
+  });
+  const list = [...active].sort();
+  status.textContent = lowerSideSaving
+    ? 'Saving…'
+    : (list.length
+      ? `Lower-side only: ${list.join(', ')} · applies within ~2s (${key})`
+      : `No lower-side-only tokens · ${key}`);
+}
+
+async function toggleLowerSideAsset(asset) {
+  if (lowerSideSaving || !state.live) return;
+  const key = lowerSideControlKey();
+  if (!key) return;
+  const scope = skipControlScope();
+  const next = lowerSideAssetsActive();
+  if (next.has(asset)) next.delete(asset);
+  else next.add(asset);
+  const value = [...next].sort().join(',');
+  // Skip and lower-side-only are mutually exclusive.
+  const skipKey = skipControlKey();
+  const skipNext = skipAssetsActive();
+  const clearedSkip = skipNext.delete(asset);
+  const values = { [key]: value || 'none' };
+  if (clearedSkip) values[skipKey] = [...skipNext].sort().join(',') || 'none';
+  lowerSideSaving = true;
+  lowerSideChipSig = '';
+  skipChipSig = '';
+  renderLowerSideTokens();
+  renderSkipTokens();
+  try {
+    const res = await post('/api/controls', { scope, values });
+    if (!res.ok) {
+      notice(res.errors ? res.errors.join('; ') : 'Could not save lower-side list', true);
+    } else {
+      CTRL.stored = res.stored || CTRL.stored;
+      if (state.live.controls) {
+        state.live.controls.values = state.live.controls.values || {};
+        Object.assign(state.live.controls.values, values);
+      }
+      notice(value ? `Lower-side only: ${value}` : 'Lower-side list cleared', false);
+    }
+  } catch (err) {
+    notice(String(err && err.message || err), true);
+  } finally {
+    lowerSideSaving = false;
+    lowerSideChipSig = '';
+    skipChipSig = '';
+    renderLowerSideTokens();
+    renderSkipTokens();
+  }
+}
+
+/* ── Skip pairs mode (Market page, CMC): wipe-risk gate on opposite directions ─ */
+const SKIP_PAIRS_MODE_KEY = 'cmc.skip_pairs_mode_enabled';
+let skipPairsModeSig = '';
+let skipPairsModeSaving = false;
+
+function skipPairsModeControlKey() {
+  const s = (state.live && state.live.strategy) || '';
+  return s === 'cross_market_correlation' ? SKIP_PAIRS_MODE_KEY : null;
+}
+
+function skipPairsModeActive() {
+  const key = skipPairsModeControlKey();
+  if (!key) return false;
+  const running = (state.live.controls && state.live.controls.values) || {};
+  if (key in running) return !!running[key];
+  const stored = (CTRL.stored && CTRL.stored[skipControlScope()]) || {};
+  if (key in stored) return !!stored[key];
+  // Config default is on when the bot has not reported the tunable yet.
+  return true;
+}
+
+function renderSkipPairsMode() {
+  const host = $('#skip-pairs-mode');
+  const input = $('#skip-pairs-mode-input');
+  const status = $('#skip-pairs-mode-status');
+  if (!host || !input) return;
+  const key = skipPairsModeControlKey();
+  if (!state.live || !key) { host.hidden = true; skipPairsModeSig = ''; return; }
+  host.hidden = false;
+  const on = skipPairsModeActive();
+  const sig = JSON.stringify([on, key, skipPairsModeSaving]);
+  if (sig === skipPairsModeSig) return;
+  skipPairsModeSig = sig;
+  input.checked = on;
+  input.disabled = skipPairsModeSaving;
+  status.textContent = skipPairsModeSaving
+    ? 'Saving…'
+    : (on
+      ? `Skip pairs on · wipe model rejects high-loss directions · applies within ~2s (${key})`
+      : `Skip pairs off · all directions allowed by cost/EV only · ${key}`);
+}
+
+async function setSkipPairsMode(on) {
+  if (skipPairsModeSaving || !state.live) return;
+  const key = skipPairsModeControlKey();
+  if (!key) return;
+  const scope = skipControlScope();
+  const values = { [key]: !!on };
+  skipPairsModeSaving = true;
+  skipPairsModeSig = '';
+  renderSkipPairsMode();
+  try {
+    const res = await post('/api/controls', { scope, values });
+    if (!res.ok) {
+      notice(res.errors ? res.errors.join('; ') : 'Could not save skip pairs mode', true);
+    } else {
+      CTRL.stored = res.stored || CTRL.stored;
+      if (state.live.controls) {
+        state.live.controls.values = state.live.controls.values || {};
+        Object.assign(state.live.controls.values, values);
+      }
+      notice(on ? 'Skip pairs mode on' : 'Skip pairs mode off', false);
+    }
+  } catch (err) {
+    notice(String(err && err.message || err), true);
+  } finally {
+    skipPairsModeSaving = false;
+    skipPairsModeSig = '';
+    renderSkipPairsMode();
+  }
+}
+
 function renderPicker() {
   const host = $('#market-picker');
   const markets = pickerMarkets();
@@ -1207,6 +1535,56 @@ function renderPosition() {
         <th scope="col">Avg price</th><th scope="col">Bid</th><th scope="col">Value at bid</th></tr></thead>
       <tbody>${row('UP', pos.up)}${row('DOWN', pos.down)}</tbody>
     </table></div>`;
+}
+
+/* Cheapside's current seven-market cheapest-leg quote, published by the strategy's
+   basket diagnostics; fall back to the locked plan while it is executing. */
+function renderCheapsideAverage() {
+  const host = $('#cheapside-average');
+  const strategy = String((state.live && state.live.strategy) || '').toLowerCase();
+  const isCheapside = String(state.botId || '').toLowerCase().includes('cheapside') || strategy === 'cheapside';
+  if (!isCheapside || !state.live) {
+    host.hidden = true;
+    $('#cheapside-projection').hidden = true;
+    return;
+  }
+  const diagnostics = Object.values(state.live.cheapside || {})
+    .filter((x) => x && x.average_cheap_ask != null && Number.isFinite(Number(x.average_cheap_ask)) && x.t != null)
+    .sort((a, b) => Number(b.t) - Number(a.t));
+  const plans = Object.values(state.live.cheapside_baskets || {})
+    .filter((x) => x && x.average_cheap_ask != null && Number.isFinite(Number(x.average_cheap_ask)))
+    .sort((a, b) => Number(b.epoch || 0) - Number(a.epoch || 0));
+  const average = diagnostics.length ? Number(diagnostics[0].average_cheap_ask)
+    : plans.length ? Number(plans[0].average_cheap_ask) : null;
+  renderCheapsideProjection();
+  host.hidden = average == null;
+  if (host.hidden) return;
+  const source = diagnostics.length ? 'latest basket quotes' : 'active basket plan';
+  host.innerHTML = `<span class="cheapside-average-label">Average ask · six cheapest of seven</span>`
+    + `<strong>${average.toFixed(3)}</strong><span class="cheapside-average-note">${source}</span>`;
+}
+
+function renderCheapsideProjection() {
+  const host = $('#cheapside-projection');
+  const p = state.live && state.live.cheapside_projection;
+  const cheapside = String(state.botId || '').toLowerCase().includes('cheapside')
+    || String((state.live && state.live.strategy) || '').toLowerCase() === 'cheapside';
+  if (!cheapside || !p || !p.totals) { host.hidden = true; return; }
+  const t = p.totals;
+  const usd = (n) => `${n >= 0 ? '+' : ''}$${Number(n || 0).toFixed(2)}`;
+  host.hidden = false;
+  host.innerHTML = `<div class="cheapside-projection-head"><b>Basket value · epoch ${p.epoch}</b>`
+    + `<span>Live quotes ${p.quote_count || 0}/${p.market_count || 7}</span></div>`
+    + `<div class="cheapside-projection-kpis">`
+    + `<div><span>Now · marked value</span><b>$${Number(t.now_value || 0).toFixed(2)}</b>`
+    + `<small>P&amp;L ${usd(t.now_pnl)}</small></div>`
+    + `<div><span>Leaders win · payout value</span><b>$${Number(t.leaders_win_value || 0).toFixed(2)}</b>`
+    + `<small>P&amp;L ${usd(t.leaders_win_pnl)} · actual shares held</small></div>`
+    + `<div><span>Leaders lose · payout value</span><b>$${Number(t.leaders_lose_value || 0).toFixed(2)}</b>`
+    + `<small>P&amp;L ${usd(t.leaders_lose_pnl)} · actual shares held</small></div></div>`
+    + `<div class="cheapside-projection-legs">${(p.rows || []).map((r) =>
+      `<span>${r.asset} ${r.side} · now ${r.now_price == null ? '—' : Number(r.now_price).toFixed(3)}`
+      + ` · ${Number(r.shares || 0).toFixed(1)} sh</span>`).join('')}</div>`;
 }
 
 /* Format a crypto price at a sensible precision for its own magnitude --
@@ -1495,9 +1873,9 @@ function bidAsk(bid, ask) {
 const spreadCents = (bid, ask) => (typeof bid === 'number' && typeof ask === 'number'
   ? `${((ask - bid) * 100).toFixed(1)}¢ spread` : 'one-sided book');
 
-function priceReadout(p, live) {
+function priceReadout(p, live, host = $('#price-readout')) {
   if (!p) return;
-  readout($('#price-readout'), roWhen(p, live), [
+  readout(host, roWhen(p, live), [
     { color: css('--series-1'), value: p.up.toFixed(3), label: `Up · ${bidAsk(p.ub, p.ua)} · ${spreadCents(p.ub, p.ua)}` },
     { color: css('--series-2'), value: p.down.toFixed(3), label: `Down · ${bidAsk(p.db, p.da)} · ${spreadCents(p.db, p.da)}` },
   ]);
@@ -1506,13 +1884,15 @@ function priceReadout(p, live) {
 /* Parameterised so a CLOSED market can be drawn into an offscreen host for
    PNG export without disturbing what is on screen. */
 function renderPriceChart(slug = state.selected, host = $('#price-chart'),
-                          forExport = false) {
-  const hist = (state.live.price_history || {})[slug];
+                          forExport = false, options = {}) {
+  const live = options.data || state.live;
+  const legendHost = options.legendHost || $('#price-legend');
+  const hist = (live.price_history || {})[slug];
   const pts = (hist || []).filter(inWindow);
-  if (pts.length < 2) return emptyChart(host, $('#price-legend'), forExport, hist);
+  if (pts.length < 2) return emptyChart(host, legendHost, forExport, hist);
 
   const cUp = css('--series-1'), cDown = css('--series-2');
-  const H = forExport ? 300 : Math.round(300 * MARKET_CHART_SCALE), m = { t: 30, r: 56, b: 34, l: 48 };
+  const H = options.height || (forExport ? 300 : Math.round(300 * MARKET_CHART_SCALE)), m = { t: 30, r: 56, b: 34, l: 48 };
   const { svg, w } = mount(host, H);
   const pw = w - m.l - m.r, ph = H - m.t - m.b;
   const Y = (v) => m.t + ph - v * ph;                 // prices live in [0,1]
@@ -1541,16 +1921,32 @@ function renderPriceChart(slug = state.selected, host = $('#price-chart'),
     svg.appendChild(t);
   });
 
+  // the bot's average cost per side in this market (the user, 2026-10-14): a dashed line in the side's colour at the
+  // average fee-free price paid, labelled with the shares held -- a reference level, not a series, hence dashed
+  const held = slug ? ((live.market_positions || {})[slug] || null) : null;
+  const avgLines = [];
+  [['up', cUp, 'UP'], ['down', cDown, 'DOWN']].forEach(([key, color, side]) => {
+    const t = held && held[key];
+    if (!t || !(t.shares > 0) || t.avg == null || !(t.avg > 0 && t.avg < 1)) return;
+    const y = Y(t.avg);
+    svg.appendChild(el('line', { x1: m.l, x2: m.l + pw, y1: y, y2: y, stroke: color, 'stroke-width': 1.5,
+                                 'stroke-dasharray': '6 4', opacity: 0.85 }));
+    const lab = el('text', { class: 'value-label', x: m.l + pw - 6, y: y - 5, fill: color, 'text-anchor': 'end' });
+    lab.textContent = `${side} avg ${Number(t.avg).toFixed(3)} × ${fmt.num(t.shares, 2)}`;
+    svg.appendChild(lab);
+    avgLines.push({ label: `${side} avg cost ${Number(t.avg).toFixed(3)}`, color, glyph: '╌' });
+  });
+
   // the strike distance, expressed on THIS axis as the Up probability it
   // implies (distance / expected move through the pricer's own CDF), so the
   // model's number sits directly against the market's without a second scale
   let implied = null;
   if (state.overlay && !forExport) {
-    const rec = (state.live.closed_markets || []).find((x) => x.slug === slug)
-      || (state.live.live_markets || []).find((x) => x.slug === slug);
+    const rec = (live.closed_markets || []).find((x) => x.slug === slug)
+      || (live.live_markets || []).find((x) => x.slug === slug);
     const strike = rec && rec.strike ? rec.strike : null;
     const asset = (slug || '').split('-')[0].toUpperCase();
-    const sigma = (state.live.sigma_bps_per_sec || {})[asset] || 0;
+    const sigma = (live.sigma_bps_per_sec || {})[asset] || 0;
     if (strike && sigma > 0) {
       implied = new Map();
       pts.forEach((p) => {
@@ -1586,7 +1982,7 @@ function renderPriceChart(slug = state.selected, host = $('#price-chart'),
   hitLayer.addEventListener('mousemove', (ev) => {
     const p = nearestByX(pts, ev, svg, m, pw);
     if (!p) return;
-    if (forExport) hov.show(X(p), p); else linkHover(p.t);
+    if (forExport || options.standalone) hov.show(X(p), p); else linkHover(p.t);
     const rows = [
       ['Up', `${p.up.toFixed(3)} · ${bidAsk(p.ub, p.ua)}`, cUp],
       ['Down', `${p.down.toFixed(3)} · ${bidAsk(p.db, p.da)}`, cDown],
@@ -1601,11 +1997,11 @@ function renderPriceChart(slug = state.selected, host = $('#price-chart'),
     }
     showTip(tipRows(tipTime(p), rows), ev);
   });
-  hitLayer.addEventListener('mouseleave', () => { if (forExport) hov.clear(); else linkLeave(); hideTip(); });
+  hitLayer.addEventListener('mouseleave', () => { if (forExport || options.standalone) hov.clear(); else linkLeave(); hideTip(); });
 
   // every ask the strategy looked at, coloured by what it decided: the
   // "why didn't we buy" answer drawn on the price path itself
-  const marks = ((state.live.signal_marks || {})[slug] || []).filter((k) => k.ask != null);
+  const marks = ((live.signal_marks || {})[slug] || []).filter((k) => k.ask != null);
   const markColor = (dec) => (
     dec === 'SIGNAL_GENERATED' ? css('--ok') || '#2e9e5b'
     : dec === 'SIGNAL_REJECTED_LOW_EDGE' ? css('--warn') || '#d9962b'
@@ -1638,7 +2034,7 @@ function renderPriceChart(slug = state.selected, host = $('#price-chart'),
 
   // where we actually bought — the whole point of plotting this (sells are drawn
   // from the order points below, as hollow diamonds)
-  const fills = (state.live.ledger || []).filter(
+  const fills = (live.ledger || []).filter(
     (r) => r.event === 'fill' && r.slug === slug && r.action !== 'SELL');
   const boughtAt = fills.map((f) => f.ts);
   fills.forEach((f) => {
@@ -1665,7 +2061,7 @@ function renderPriceChart(slug = state.selected, host = $('#price-chart'),
   // every ORDER the strategy sent, at its limit price: × = killed at the venue (the
   // ask was gone, the cap refused it...), □ = still in flight, ◇ = an exit that sold.
   // A filled entry is the diamond above; its order point is left out.
-  const orders = ((state.live.order_marks || {})[slug] || []).filter((o) => o.limit != null);
+  const orders = ((live.order_marks || {})[slug] || []).filter((o) => o.limit != null);
   const seenOrders = new Set();
   orders.forEach((o) => {
     let at = pts[0], best = Infinity;
@@ -1733,22 +2129,265 @@ function renderPriceChart(slug = state.selected, host = $('#price-chart'),
                                 'SIGNAL_REJECTED_STALE_QUOTE', 'SIGNAL_REJECTED_LIQUIDITY'].includes(d))) {
       items.push({ label: 'ask: other rejection', color: css('--text-tertiary') || '#8a8f98' });
     }
-    legend($('#price-legend'), items);
+    avgLines.forEach((it) => items.push(it));
+    legend(legendHost, items);
   }
 
   if (forExport) return svg;
   const lastPt = pts[pts.length - 1];
+  if (options.standalone) {
+    priceReadout(lastPt, true, options.readoutHost);
+    return svg;
+  }
   linkPanel('price', {
     at: (t) => nearestByT(pts, t),
-    show: (p) => { hov.show(X(p), p); priceReadout(p, false); },
-    clear: () => { hov.clear(); priceReadout(lastPt, true); },
+    show: (p) => { hov.show(X(p), p); priceReadout(p, false, options.readoutHost); },
+    clear: () => { hov.clear(); priceReadout(lastPt, true, options.readoutHost); },
   });
-  const mk = (state.live.live_markets || []).find((x) => x.slug === slug);
+  const mk = (live.live_markets || []).find((x) => x.slug === slug);
   $('#chart-sub').textContent = mk
     ? `${fmt.mkt(slug)} · strike ${mk.strike ? mk.strike.toLocaleString(undefined, { maximumFractionDigits: 4 }) : '—'} · ${fmt.mmss(mk.secs_left)} left · ${mk.status || ''}`
     : 'Where the price sits against the strike, what the market charges for each side, and the raw price path.';
   return svg;
 }
+
+/* The all-market view uses the same SVG renderer as the selected Market chart.
+   Its separate live request carries compact history deltas for each open slug. */
+const ALL_CHARTS = { open: false, timer: null, busy: false, seq: 0, slugs: [], histories: {}, data: null };
+function openChartMarkets(live) {
+  const skipped = skipAssetsActive();
+  return ((live && live.live_markets) || [])
+    .filter((m) => m.secs_left > 0 && m.secs_left <= WINDOW_S)
+    .filter((m) => {
+      const asset = String(m.asset || (m.slug || '').split('-')[0] || '').toUpperCase();
+      return !asset || !skipped.has(asset);
+    })
+    .sort((a, b) => a.slug.localeCompare(b.slug));
+}
+
+function allChartsAccount(live) {
+  const acc = live && live.account_sync;
+  if (acc && acc.cash != null && acc.portfolio != null) {
+    return {
+      cash: Number(acc.cash),
+      portfolio: Number(acc.portfolio),
+      // Venue portfolio − cash = marked position value (same role as equity − balance).
+      posValue: Number(acc.portfolio) - Number(acc.cash),
+      note: 'venue account',
+    };
+  }
+  const cash = Number((live && live.balance) || 0);
+  const portfolio = Number((live && live.equity) || 0);
+  return {
+    cash,
+    portfolio,
+    posValue: portfolio - cash,
+    note: 'bot books',
+  };
+}
+
+function marketPosMarked(pos) {
+  /** Per-side value using value / bid / mark; returns {cost, value, pnl} or null if empty. */
+  if (!pos) return null;
+  const cost = Number(pos.cost);
+  if (!Number.isFinite(cost)) return null;
+  if (pos.pnl_now != null && Number.isFinite(Number(pos.pnl_now))
+      && pos.value != null && Number.isFinite(Number(pos.value))) {
+    return { cost, value: Number(pos.value), pnl: Number(pos.pnl_now) };
+  }
+  let value = 0;
+  let complete = true;
+  let held = false;
+  ['up', 'down'].forEach((side) => {
+    const t = pos[side] || {};
+    const sh = Number(t.shares) || 0;
+    if (Math.abs(sh) <= 1e-9) return;
+    held = true;
+    if (t.value != null && Number.isFinite(Number(t.value))) {
+      value += Number(t.value);
+      return;
+    }
+    const px = t.bid != null ? Number(t.bid) : (t.mark != null ? Number(t.mark) : NaN);
+    if (Number.isFinite(px)) value += sh * px;
+    else complete = false;
+  });
+  if (!held && !(Math.abs(cost) > 1e-9)) return null;
+  if (!complete && pos.pnl_now == null) return { cost, value: null, pnl: null };
+  const pnl = (pos.pnl_now != null && Number.isFinite(Number(pos.pnl_now)))
+    ? Number(pos.pnl_now) : value - cost;
+  return { cost, value, pnl };
+}
+
+function allChartsOpenTotals(live, markets) {
+  // Current open-window charts only (same set as the modal grid / skip filter).
+  // Prior windows still held until settlement belong to portfolio, not this strip.
+  const positions = (live && live.market_positions) || {};
+  const slugs = (markets || []).map((m) => m.slug);
+  let cost = 0, value = 0, pnl = 0, held = 0, nMarked = 0, incomplete = false;
+  slugs.forEach((slug) => {
+    const marked = marketPosMarked(positions[slug]);
+    if (!marked) return;
+    held += 1;
+    cost += marked.cost;
+    if (marked.pnl != null && Number.isFinite(marked.pnl)) {
+      pnl += marked.pnl;
+      nMarked += 1;
+      if (marked.value != null) value += marked.value;
+    } else {
+      incomplete = true;
+    }
+  });
+  return {
+    cost: held ? cost : null,
+    // value − cost per market (bid, else equity mark). Null if any held leg is unmarked.
+    pnl: held && !incomplete && nMarked === held ? pnl : null,
+    value: held && !incomplete && nMarked === held ? value : null,
+    held,
+  };
+}
+
+function renderAllChartsSummary(live, markets) {
+  const host = $('#all-charts-summary');
+  if (!host) return;
+  if (!live) { host.hidden = true; host.innerHTML = ''; return; }
+  host.hidden = false;
+  const acct = allChartsAccount(live);
+  const tot = allChartsOpenTotals(live, markets);
+  const pnlCls = tot.pnl == null ? '' : (tot.pnl >= 0 ? 'pos' : 'neg');
+  const chartN = (markets || []).length;
+  const items = [
+    { l: 'Cash', v: fmt.money(acct.cash), n: acct.note },
+    {
+      l: 'Portfolio',
+      v: fmt.money(acct.portfolio),
+      n: `cash ${fmt.money(acct.cash)} + positions ${fmt.money(acct.posValue)}`,
+    },
+    {
+      l: 'Open markets P&L',
+      v: tot.pnl == null ? '—' : `<span class="${pnlCls}">${fmt.signed(tot.pnl)}</span>`,
+      n: tot.held
+        ? `${tot.held} of ${chartN} charted · bid mark − cost`
+        : (chartN ? `${chartN} charted · none held` : 'nothing held'),
+    },
+    {
+      l: 'Open markets cost',
+      v: tot.cost == null ? '—' : fmt.money(tot.cost),
+      n: tot.held
+        ? `${tot.held} held · ${chartN} charted`
+        : (chartN ? `${chartN} charted · none held` : 'no open windows'),
+    },
+  ];
+  host.innerHTML = items.map((k) => `<div class="all-charts-summary-item"><span class="kpi-label">${k.l}</span>`
+    + `<span class="all-charts-summary-value">${k.v}</span><span class="kpi-note">${k.n}</span></div>`).join('');
+}
+
+function renderAllCharts() {
+  if (!ALL_CHARTS.open || !ALL_CHARTS.data) return false;
+  const live = { ...ALL_CHARTS.data, price_history: ALL_CHARTS.histories };
+  const markets = openChartMarkets(live);
+  renderAllChartsSummary(live, markets);
+  const grid = $('#all-charts-grid');
+  const slugs = markets.map((m) => m.slug);
+  const signature = slugs.join(',');
+  // Slugs are seeded before the first paint, so compare the cards on screen,
+  // not the request list, or the grid stays empty.
+  const changed = grid.dataset.slugs !== signature;
+  if (changed) {
+    grid.dataset.slugs = signature;
+    ALL_CHARTS.slugs = slugs;
+    grid.replaceChildren();
+    if (!markets.length) {
+      const empty = document.createElement('p');
+      empty.className = 'live-empty';
+      empty.textContent = 'No market is open in the current window.';
+      grid.appendChild(empty);
+    }
+    markets.forEach((m) => {
+      const card = document.createElement('section');
+      card.className = 'all-chart-card';
+      const title = document.createElement('h4'); title.textContent = fmt.mkt(m.slug);
+      const readout = document.createElement('div'); readout.className = 'readout';
+      const chart = document.createElement('div'); chart.className = 'chart-host';
+      const keys = document.createElement('div'); keys.className = 'legend';
+      card.append(title, readout, chart, keys);
+      card.dataset.slug = m.slug;
+      grid.appendChild(card);
+    });
+  }
+  markets.forEach((m) => {
+    const card = grid.querySelector(`[data-slug="${CSS.escape(m.slug)}"]`);
+    if (!card) return;
+    renderPriceChart(m.slug, card.querySelector('.chart-host'), false, {
+      standalone: true, data: live, height: 220,
+      readoutHost: card.querySelector('.readout'), legendHost: card.querySelector('.legend'),
+    });
+  });
+  return changed;
+}
+async function refreshAllCharts() {
+  if (!ALL_CHARTS.open || ALL_CHARTS.busy) return;
+  ALL_CHARTS.busy = true;
+  const seq = ++ALL_CHARTS.seq, bot = state.botId;
+  let refetch = false;
+  try {
+    const requested = ALL_CHARTS.slugs.join(',');
+    const params = new URLSearchParams({ bot, charts: requested });
+    const since = {};
+    ALL_CHARTS.slugs.forEach((slug) => {
+      const points = ALL_CHARTS.histories[slug];
+      if (points && points.length) since[slug] = points[points.length - 1].t;
+    });
+    if (Object.keys(since).length) params.set('since', JSON.stringify(since));
+    const response = await authFetch('/api/live?' + params.toString());
+    const data = response && response.ok ? await response.json() : null;
+    if (!data || seq !== ALL_CHARTS.seq || bot !== state.botId) return;
+    const incoming = data.price_history || {}, partial = data.history_partial_by_slug || {};
+    Object.keys(incoming).forEach((slug) => {
+      const points = incoming[slug] || [];
+      const merged = partial[slug] && ALL_CHARTS.histories[slug]
+        ? ALL_CHARTS.histories[slug].concat(points) : points;
+      ALL_CHARTS.histories[slug] = merged.slice(-1800);
+    });
+    const active = new Set(openChartMarkets(data).map((m) => m.slug));
+    Object.keys(ALL_CHARTS.histories).forEach((slug) => { if (!active.has(slug)) delete ALL_CHARTS.histories[slug]; });
+    ALL_CHARTS.data = data;
+    const changed = renderAllCharts();
+    // The list of open markets can only be known from this payload. Fetch those
+    // histories immediately instead of leaving the cards empty until the next tick.
+    refetch = changed && ALL_CHARTS.slugs.join(',') !== requested;
+  } catch { /* transient: the next refresh retries */ }
+  finally { ALL_CHARTS.busy = false; }
+  if (refetch && ALL_CHARTS.open) refreshAllCharts();
+}
+function openAllCharts() {
+  const dlg = $('#all-charts-dialog');
+  ALL_CHARTS.open = true;
+  ALL_CHARTS.slugs = openChartMarkets(state.live).map((m) => m.slug);
+  ALL_CHARTS.histories = {};
+  ALL_CHARTS.data = null;
+  tip.hidden = true;
+  dlg.appendChild(tip);
+  // Paint cash / portfolio / open totals immediately from the last live poll
+  // (open P&L/cost = current-window charted markets only).
+  renderAllChartsSummary(state.live, openChartMarkets(state.live));
+  try { dlg.showModal(); } catch { dlg.setAttribute('open', ''); }
+  refreshAllCharts();
+  clearInterval(ALL_CHARTS.timer);
+  ALL_CHARTS.timer = setInterval(refreshAllCharts, 1200);
+}
+function closeAllCharts() {
+  ALL_CHARTS.open = false;
+  ALL_CHARTS.seq++;
+  clearInterval(ALL_CHARTS.timer);
+  ALL_CHARTS.timer = null;
+  const summary = $('#all-charts-summary');
+  if (summary) { summary.hidden = true; summary.innerHTML = ''; }
+  hideTip();
+  document.body.appendChild(tip);
+}
+$('#all-charts-open').addEventListener('click', openAllCharts);
+$('#all-charts-close').addEventListener('click', () => $('#all-charts-dialog').close());
+$('#all-charts-dialog').addEventListener('close', closeAllCharts);
 
 /* ═══════════════════════ closed-window PNG export ═══════════════════════ */
 
@@ -2179,7 +2818,7 @@ function renderAgreement() {
     : '';
 }
 
-const TRADE_COLS = ['Time', 'Market', 'Side', 'Price', 'Shares', 'Cost', 'Our fair', 'Left', 'Result'];
+const TRADE_COLS = ['5m window', 'Market', 'Sides', 'Avg buy', 'Shares', 'Net cost', 'Our fair', 'Left', 'Result'];
 
 /* Settlement polls the venue up to SETTLE_MAX_ATTEMPTS x SETTLE_RETRY_MS
    (5 x 30 s) after a window closes, so a fill is legitimately unresolved for
@@ -2219,36 +2858,79 @@ function resultOf(f, s, now) {
 function tradeRows() {
   const led = state.live.ledger || [];
   const settled = {};
-  led.forEach((r) => { if (r.event === 'settle') settled[r.slug] = r; });
+  const settlementPnl = {};
+  led.forEach((r) => {
+    if (r.event !== 'settle') return;
+    settled[r.slug] = r;
+    settlementPnl[r.slug] = (settlementPnl[r.slug] || 0) + (Number(r.pnl) || 0);
+  });
   const now = Date.now();
-  return led.filter((r) => r.event === 'fill').slice().reverse().map((f) => {
-    const s = settled[f.slug];
+  const groups = new Map();
+  led.filter((r) => r.event === 'fill').forEach((f) => {
+    if (!groups.has(f.slug)) groups.set(f.slug, []);
+    groups.get(f.slug).push(f);
+  });
+  return [...groups.entries()].map(([slug, fills]) => {
+    const f = fills[0];
+    const s = settled[slug];
     const res = resultOf(f, s, now);
+    const buys = fills.filter((x) => String(x.action || 'BUY').toUpperCase() !== 'SELL');
+    const sells = fills.filter((x) => String(x.action || '').toUpperCase() === 'SELL');
+    const size = (xs) => xs.reduce((n, x) => n + (Number(x.size) || 0), 0);
+    const cost = (xs) => xs.reduce((n, x) => n + Math.abs(Number(x.cost ?? x.price * x.size) || 0), 0);
+    const bought = size(buys), boughtCost = cost(buys);
+    const sold = size(sells), soldValue = cost(sells);
+    const sides = [...new Set(fills.map((x) => x.side).filter(Boolean))];
+    const latest = fills[fills.length - 1];
+    const fairs = fills.filter((x) => x.p_used != null || x.fair != null);
+    const firstTs = Math.min(...fills.map((x) => x.ts));
     return {
-      slug: f.slug,
-      sideRaw: f.side || '',
-      ts: f.ts,
-      time: fmt.clock(f.ts),
-      market: fmt.mkt(f.slug),
-      // an exit is a SELL of the same side we bought; say so rather than
-      // showing a second "UP" row that looks like we doubled down
-      side: f.action === 'SELL' ? `${f.side || '?'} exit` : (f.side || '—'),
-      price: f.price.toFixed(3),
-      shares: fmt.num(f.size, 1),
-      cost: fmt.money(f.cost ?? f.price * f.size),
-      fair: (f.p_used == null ? (f.fair ?? 0) : (f.side === 'UP' ? f.p_used : 1 - f.p_used)).toFixed(3),
-      left: `${Math.round(f.secs_left || 0)}s`,
+      slug, sideRaw: '', ts: firstTs,
+      time: fmt.clock(firstTs), market: fmt.mkt(slug),
+      side: sides.join(' + ') || '—',
+      price: bought ? (boughtCost / bought).toFixed(3) : '—',
+      shares: `${fmt.num(bought, 1)} bought${sold ? ` · ${fmt.num(sold, 1)} sold` : ''}`,
+      cost: fmt.money(boughtCost - soldValue),
+      fair: fairs.length ? (fairs.reduce((n, x) => n + Number(x.p_used == null
+        ? (x.side === 'UP' ? x.fair : 1 - x.fair) : (x.side === 'UP' ? x.p_used : 1 - x.p_used)), 0) / fairs.length).toFixed(3) : '—',
+      left: `${Math.round(latest.secs_left || 0)}s`,
       result: res.text,
       won: res.won,
+      pnl: Object.prototype.hasOwnProperty.call(settlementPnl, slug) ? settlementPnl[slug] : null,
+      count: fills.length,
     };
-  });
+  }).sort((a, b) => b.ts - a.ts);
 }
 
 function renderTrades() {
   const rows = tradeRows();
+  const displayRows = [];
+  let activeGroup = null;
+  rows.forEach((r) => {
+    if (String(state.botId || '').toLowerCase().includes('cheapside')) {
+      const key = rangeForSlug(r.slug, r.ts);
+      if (!activeGroup || activeGroup.key !== key) {
+        activeGroup = { group: key, key, rows: [] };
+        displayRows.push(activeGroup);
+      }
+      activeGroup.rows.push(r);
+    } else {
+      activeGroup = null;
+      displayRows.push(r);
+    }
+  });
   $('#trades-table').innerHTML = rows.length
     ? '<thead><tr>' + TRADE_COLS.map((h) => `<th scope="col">${h}</th>`).join('') + '</tr></thead><tbody>'
-      + rows.map((r) => `<tr ${tradeRowAttrs(r.slug, r.sideRaw, r.ts)}>
+      + displayRows.map((r) => r.group
+        ? (() => {
+          const known = r.rows.filter((x) => x.pnl != null);
+          const pending = r.rows.length - known.length;
+          const pnl = known.reduce((sum, x) => sum + x.pnl, 0);
+          return `<tr class="fl-market"><td colspan="9" class="l">${r.group} · Known P&amp;L `
+            + `<span class="${pnl >= 0 ? 'pos' : 'neg'}">${fmt.signed(pnl)}</span>`
+            + `${pending ? ` · partial, ${pending} market${pending === 1 ? '' : 's'} pending` : ' · total'}</td></tr>`;
+        })()
+        : `<tr ${tradeRowAttrs(r.slug, r.sideRaw, r.ts)}>
           <td>${r.time}</td><td>${r.market}</td>
           <td><span class="side-tag" data-side="${r.side}">${r.side}</span></td>
           <td>${r.price}</td><td>${r.shares}</td><td>${r.cost}</td>
@@ -2260,7 +2942,7 @@ function renderTrades() {
   const done = rows.filter((r) => r.won !== null);
   const st = state.live.stats || {};
   $('#trades-note').textContent = done.length
-    ? `${done.length} settled fills · realised ${fmt.signed(st.realised_pnl || 0)}. `
+    ? `${done.length} settled 5m markets · realised ${fmt.signed(st.realised_pnl || 0)}. `
       + 'Buying a favourite at price p only profits if the true win rate exceeds p.'
     : 'Nothing has settled yet.';
 }
@@ -2441,37 +3123,43 @@ function renderHistoryPager(h) {
    returned. The raw stream is one toggle away for anyone who wants it. */
 function renderHistoryTrips(rows) {
   const t = $('#history-table');
-  const head = '<thead><tr><th scope="col">Market</th><th scope="col">Side</th>'
-    + '<th scope="col">Shares</th><th scope="col">Bought</th><th scope="col">Closed</th>'
+  const head = '<thead><tr><th scope="col">5m window</th><th scope="col">Market</th><th scope="col">Sides</th>'
+    + '<th scope="col">Fills</th><th scope="col">Shares bought</th><th scope="col">Net cost</th>'
     + '<th scope="col">Held</th><th scope="col">Result</th></tr></thead>';
   if (!rows.length) {
-    t.innerHTML = head + '<tbody><tr><td colspan="7" class="dim">No trades yet.</td></tr></tbody>';
+    t.innerHTML = head + '<tbody><tr><td colspan="8" class="dim">No markets traded yet.</td></tr></tbody>';
     return;
   }
   t.innerHTML = head + '<tbody>' + rows.map((r) => {
-    const closedWord = r.status === 'open' ? 'still open'
-      : r.status === 'sold' ? 'sold' : 'settled';
-    const closedCell = r.closed_ts == null
-      ? '<span class="dim">still open</span>'
-      : `${fmt.clock(r.closed_ts)}<span class="sub">${closedWord}`
-        + `${r.exit_price == null ? '' : ` @ ${fmt.cents(r.exit_price)}`}</span>`;
+    if (Array.isArray(r.markets)) {
+      const range = rangeForEpoch(r.epoch);
+      const total = Number(r.pnl_known) || 0;
+      const pending = Number(r.pending_markets) || 0;
+      const groupHead = `<tr class="fl-market"><td colspan="8" class="l">${range} · ${r.markets.length} markets · `
+        + `Total P&amp;L <span class="${total >= 0 ? 'pos' : 'neg'}">${fmt.signed(total)}</span>`
+        + `${pending ? ` · partial, ${pending} pending` : ''}</td></tr>`;
+      const markets = r.markets.map((m) => historyMarketRow(m)).join('');
+      return groupHead + markets;
+    }
+    return historyMarketRow(r);
+  }).join('') + '</tbody>';
+}
+
+function historyMarketRow(r) {
     const pnl = r.pnl;
-    // a both-sides window reports its P&L once, on its last side's row
-    const result = pnl == null
-      ? (r.settled_ts != null ? '<span class="dim">in the window total</span>' : '<span class="dim">—</span>')
+    const result = pnl == null ? '<span class="dim">awaiting settlement</span>'
       : `<span class="${pnl >= 0 ? 'pos' : 'neg'}">${fmt.signed(pnl)}</span>`
-        + `<span class="sub">fees ${fmt.money(r.fees || 0)}</span>`;
-    return `<tr ${tradeRowAttrs(r.slug, r.side, r.bought_ts)}>
+        + `<span class="sub">fees ${fmt.money(r.fees || 0)} · ${r.status}</span>`;
+    return `<tr ${tradeRowAttrs(r.slug, '', r.bought_ts)}>
+        <td>${r.bought_ts == null ? '—' : fmt.clock(r.bought_ts)}</td>
         <td>${fmt.mkt(r.slug)}${r.mode ? `<span class="sub">${r.mode}</span>` : ''}</td>
-        <td><span class="side-tag" data-side="${r.side || ''}">${r.side || '—'}</span></td>
-        <td>${fmt.num(r.shares, 2)}<span class="sub">${r.buys} fill${r.buys === 1 ? '' : 's'}</span></td>
-        <td>${r.bought_ts == null ? '—' : fmt.clock(r.bought_ts)}
-            <span class="sub">${r.entry_price == null ? '' : `@ ${fmt.cents(r.entry_price)}`}</span></td>
-        <td>${closedCell}</td>
-        <td>${r.hold_s == null ? '—' : fmt.dur(r.hold_s)}</td>
+        <td>${r.side}</td>
+        <td>${r.fills} fills · ${r.positions} position${r.positions === 1 ? '' : 's'}</td>
+        <td>${fmt.num(r.shares, 2)}<span class="sub">${r.buys} buys · ${r.sells} sells</span></td>
+        <td>${fmt.money(r.cost)}</td>
+        <td>${r.hold_s == null ? (r.status === 'open' ? 'open' : '—') : fmt.dur(r.hold_s)}</td>
         <td>${result}</td>
       </tr>`;
-  }).join('') + '</tbody>';
 }
 
 function renderHistoryTable(rows) {
@@ -2586,7 +3274,6 @@ function renderHistory(h, key) {
   // follow it so Prev/Next keep working off the page that actually exists
   historyPage = h.page || 1;
   const pnl = h.realised_pnl || 0;
-  const s = h.trips_summary || {};
 
   // the money filter only earns its place once two kinds of bot have written
   $('#history-mode-field').hidden = (h.modes || []).length < 2;
@@ -2594,29 +3281,24 @@ function renderHistory(h, key) {
   $('#history-kpis').innerHTML = [
     { l: 'Realised PnL, all runs', v: fmt.signed(pnl), n: 'sum of every settlement on disk',
       cls: pnl >= 0 ? 'pos' : 'neg' },
-    { l: 'Trades', v: fmt.num(s.trips || 0),
-      n: `${fmt.num(h.events_total || 0)} events folded${s.open ? ` · ${s.open} open` : ''}` },
-    { l: 'Won', v: s.win_rate == null ? '—' : fmt.pct(s.win_rate),
-      n: `${fmt.num(s.wins || 0)}W / ${fmt.num(s.losses || 0)}L` },
-    { l: 'Typical hold', v: s.median_hold_s == null ? '—' : fmt.dur(s.median_hold_s),
-      n: `${fmt.num(s.sold_early || 0)} sold early · ${fmt.num(s.held_to_resolution || 0)} held` },
-    { l: 'Fees paid', v: fmt.money(s.fees || 0), n: `${fmt.num(s.shares || 0, 2)} shares traded` },
+    { l: '5m markets', v: fmt.num(h.trips_total || 0),
+      n: `${fmt.num(h.events_total || 0)} events grouped · ${fmt.num(h.markets_open || 0)} open` },
+    { l: 'Market win rate', v: h.settled ? fmt.pct(h.wins / h.settled) : '—',
+      n: `${fmt.num(h.wins || 0)}W / ${fmt.num(h.losses || 0)}L` },
+    { l: 'Settled markets', v: fmt.num(h.settled || 0),
+      n: `${fmt.num(h.fills || 0)} fills across all windows` },
+    { l: 'Fees paid', v: fmt.money(h.fees_total || 0), n: 'all recorded fills' },
   ].map((k) => `<div class="kpi"><span class="kpi-label">${k.l}</span>`
     + `<span class="kpi-value ${k.cls || ''}">${k.v}</span><span class="kpi-note">${k.n}</span></div>`).join('');
 
   renderHistoryChart(h.curve || []);
-  if (h.view === 'events') renderHistoryTable(h.rows || []);
-  else renderHistoryTrips(h.rows || []);
+  renderHistoryTrips(h.rows || []);
   renderHistoryPager(h);
 }
 
 function historySub(view) {
-  return view === 'events'
-    ? 'Every fill and settlement exactly as the bot wrote it, newest first. '
-      + 'An entry and its exit are separate rows here.'
-    : 'One row per position, with when it was bought and when it was sold or settled. '
-      + 'A position is often entered in two fills and then exited, which is several '
-      + 'events for one trade — those are folded together here.';
+  return 'One row per 5-minute market window. All positions, fills, and settlement events '
+    + 'for that window are grouped together. Click a row to inspect the market.';
 }
 
 function wireHistory() {
@@ -2668,6 +3350,10 @@ function render(force = false) {
   if (force) pickerSig = '';
   renderHero();
   renderPicker();
+  renderSkipTokens();
+  renderLowerSideTokens();
+  renderSkipPairsMode();
+  renderCheapsideAverage();
   renderPosition();
   if (!state.overlay && !$('#strike-panel').hidden) renderStrikeChart();   // the distance panel is hidden (the user, 2026-10-05)
   renderPriceChart();
@@ -2699,7 +3385,32 @@ addEventListener('resize', () => {
 
 $('#btn-start').addEventListener('click', () => control('start'));
 $('#btn-stop').addEventListener('click', () => control('stop'));
-$('#btn-restart').addEventListener('click', () => control('restart'));
+/* Restart asks which kind (the user, 2026-10-13): keep the data (pm2 restart as before) or fresh -- the bot's
+   tagged data files deleted and the app started at its initial balance. The main bot's data is untagged, so only
+   the first choice is open to it; a real-money bot is refused the second by the server. */
+function openRestart() {
+  const dlg = $('#restart-dialog');
+  const other = state.botId !== 'main';
+  const info = other ? state.bots.find((x) => x.id === state.botId) : null;
+  $('#restart-title').textContent = `Restart ${other ? state.botId : 'the main bot'}`;
+  $('#restart-sub').textContent = other ? `pm2 ${info && info.pm2 ? info.pm2 : state.botId}` : 'this server\'s own child process';
+  const fresh = $('#restart-fresh');
+  fresh.disabled = !other;
+  fresh.title = other ? '' : 'the main bot\'s ledger is untagged: start it fresh from the command line';
+  if (!dlg.open) {
+    try { dlg.showModal(); } catch { dlg.setAttribute('open', ''); }
+  }
+}
+function closeRestart() { const dlg = $('#restart-dialog'); if (dlg.open) dlg.close(); else dlg.removeAttribute('open'); }
+$('#btn-restart').addEventListener('click', openRestart);
+$('#restart-cancel').addEventListener('click', closeRestart);
+$('#restart-keep').addEventListener('click', () => { closeRestart(); control('restart'); });
+$('#restart-fresh').addEventListener('click', () => {
+  const id = state.botId;
+  if (!window.confirm(`Delete every data file of bot "${id}" and start it again at its initial balance?\nThis cannot be undone.`)) return;
+  closeRestart();
+  control('restart', { fresh: true });
+});
 $('#copy-trades').addEventListener('click', copyTrades);
 $('#turns-toggle').checked = state.turns;
 $('#turns-toggle').addEventListener('change', (ev) => {
@@ -2714,6 +3425,12 @@ $('#overlay-toggle').addEventListener('change', (ev) => {
   applyOverlayLayout();
   render(true);
 });
+const skipPairsInput = $('#skip-pairs-mode-input');
+if (skipPairsInput) {
+  skipPairsInput.addEventListener('change', (ev) => {
+    setSkipPairsMode(!!ev.target.checked);
+  });
+}
 applyOverlayLayout();
 
 initTheme();
@@ -4511,25 +5228,36 @@ function orderMarket(slug) {
 /* THE FILL LEDGER (2026-10-12, the user's layout): every fill of a market, oldest first, with what that
    fill and everything before it pay if Up wins and if Down wins. Read whole from /api/fills (the live push
    carries only the trade log's last 60 rows) and topped up from that push between reads. "All markets"
-   shows the newest FILL_MARKETS markets, each from its first fill, so the running columns are exact.
-   Taker or maker comes from the fee: the venue charges takers and not makers (server.py _FillsIndex). */
+   shows the newest FILL_MARKETS markets. "This market" lists all order events from every currently open
+   window (compact blotter: working / filled / killed), with fills used for the footer totals. */
 const FILLS_REFRESH_MS = 3000;
 const FILL_MARKETS = 10;
 const FILLS = { key: '', rows: [], outcomes: {}, t: 0, loading: false, drawn: new Set(), primed: false };
+
+function currentOpenMarketSlugs() {
+  return [...new Set(((state.live && state.live.live_markets) || [])
+    .filter((m) => m.secs_left > 0 && m.secs_left <= WINDOW_S)
+    .map((m) => m.slug).filter(Boolean))].sort();
+}
+
+function marketFillSlugs() {
+  if (ORDERS.scope !== 'market') return [];
+  return currentOpenMarketSlugs();
+}
 
 function resetFills() {
   FILLS.key = ''; FILLS.rows = []; FILLS.outcomes = {}; FILLS.t = 0; FILLS.drawn = new Set(); FILLS.primed = false;
 }
 
 function fillsKey() {
-  return `${state.botId || ''}|${ORDERS.scope}|${ORDERS.scope === 'market' ? state.selected || '' : ''}`;
+  return `${state.botId || ''}|${ORDERS.scope}|${ORDERS.scope === 'market' ? marketFillSlugs().join(',') : ''}`;
 }
 
 async function loadFills() {
   if (FILLS.loading) return;
   const key = fillsKey();
-  const sel = state.selected;
-  if (ORDERS.scope === 'market' && !sel) {          // nothing selected: nothing to ask for
+  const slugs = marketFillSlugs();
+  if (ORDERS.scope === 'market' && !slugs.length) { // no current market(s): nothing to ask for
     FILLS.key = key; FILLS.rows = []; FILLS.outcomes = {}; FILLS.t = Date.now();
     return;
   }
@@ -4537,7 +5265,9 @@ async function loadFills() {
   let d = null;
   try {
     const q = `bot=${encodeURIComponent(state.botId || '')}`
-      + (ORDERS.scope === 'market' ? `&slug=${encodeURIComponent(sel)}` : `&markets=${FILL_MARKETS}`);
+      + (ORDERS.scope === 'market'
+        ? `&slugs=${encodeURIComponent(slugs.join(','))}`
+        : `&markets=${FILL_MARKETS}`);
     const r = await authFetch(`/api/fills?${q}`);
     d = r && r.ok ? await r.json() : null;
   } catch { d = null; }
@@ -4574,12 +5304,12 @@ function currentFills() {
   if (FILLS.key !== fillsKey()) return null;
   const rows = FILLS.rows.slice();
   const have = new Set(rows.map(fillId));
-  const slugs = new Set(rows.map((f) => f.slug));
+  const rowSlugs = new Set(rows.map((f) => f.slug));
   const newest = rows.reduce((m, f) => Math.max(m, Number(f.ts) || 0), 0);
-  const sel = state.selected;
+  const includedSlugs = ORDERS.scope === 'market' ? new Set(marketFillSlugs()) : rowSlugs;
   pushedFills().forEach((f) => {
     if (have.has(fillId(f))) return;
-    if (ORDERS.scope === 'market' ? f.slug !== sel : !(slugs.has(f.slug) || f.ts > newest)) return;
+    if (ORDERS.scope === 'market' ? !includedSlugs.has(f.slug) : !(rowSlugs.has(f.slug) || f.ts > newest)) return;
     rows.push(f);
     have.add(fillId(f));
   });
@@ -4637,16 +5367,115 @@ const winWord = (w) => (w ? `${sideWord(w.side)} ${w.settled ? 'won' : 'leading'
 function renderOrderList(force = false) {
   const table = $('#orders-table');
   if (!table) return;
+  const openMarketOrders = ORDERS.scope === 'market';
   if (FILLS.key !== fillsKey() || Date.now() - FILLS.t > FILLS_REFRESH_MS) loadFills();
   const sel = state.selected;
   const fills = currentFills();
 
   // the orders behind them, for the footer: how many were sent, are still working, never filled
   let orders = [...ORDERS.map.values()];
-  if (ORDERS.scope === 'market') orders = orders.filter((o) => o.slug === sel);
+  if (ORDERS.scope === 'market') {
+    const scopedSlugs = new Set(marketFillSlugs());
+    orders = orders.filter((o) => scopedSlugs.has(o.slug));
+  }
   else if (fills) { const shown = new Set(fills.map((f) => f.slug)); orders = orders.filter((o) => shown.has(o.slug)); }
   const working = orders.filter((o) => o.outcome === 'sent').length;
   const unfilled = orders.filter((o) => o.outcome !== 'sent' && !isFilled(o)).length;
+
+  if (openMarketOrders) {
+    const openSlugs = marketFillSlugs();
+    const positions = openSlugs.map((slug) => ((state.live && state.live.market_positions) || {})[slug]).filter(Boolean);
+    const leaders = Object.fromEntries(openSlugs.map((slug) => [slug, winningSide(slug)]));
+    const positionSignature = positions.map((p) => [p.cost, p.pnl_now, p.pnl_up_win, p.pnl_down_win]);
+    const signature = JSON.stringify([marketFillSlugs(), orders.map((o) =>
+      [o.id, o.outcome, o.filled, o.price, o.reason, o.t_done]),
+      fills && fills.map((f) => [fillId(f), f.size, f.price, f.fee]), positionSignature,
+      openSlugs.map((slug) => [slug, leaders[slug] && leaders[slug].side])]);
+    if (!changed('cheapside-open-orders', signature) && !force) return;
+    const filled = orders.filter(isFilled).length;
+    const fillRows = fills || [];
+    const totalShares = fillRows.reduce((n, f) => n + (Number(f.size) || 0), 0);
+    const totalNotional = fillRows.reduce((n, f) => n + (Number(f.size) || 0) * (Number(f.price) || 0), 0);
+    const totalFees = fillRows.reduce((n, f) => n + (Number(f.fee) || 0), 0);
+    const totalCost = positions.reduce((n, p) => n + (Number(p.cost) || 0), 0);
+    const totalPnlNow = positions.some((p) => p.pnl_now == null) ? null
+      : positions.reduce((n, p) => n + Number(p.pnl_now), 0);
+    const leaderPnls = openSlugs.map((slug) => {
+      const p = ((state.live && state.live.market_positions) || {})[slug];
+      const leader = leaders[slug];
+      if (!p || !leader) return null;
+      return leader.side === 'UP'
+        ? [Number(p.pnl_up_win), Number(p.pnl_down_win)]
+        : [Number(p.pnl_down_win), Number(p.pnl_up_win)];
+    });
+    const totalPnlLeaderWin = leaderPnls.some((x) => !x || !x.every(Number.isFinite)) ? null
+      : leaderPnls.reduce((n, x) => n + x[0], 0);
+    const totalPnlLeaderLose = leaderPnls.some((x) => !x || !x.every(Number.isFinite)) ? null
+      : leaderPnls.reduce((n, x) => n + x[1], 0);
+    const pnlSummary = (v) => v == null ? '—'
+      : `<span class="${v >= 0 ? 'pos' : 'neg'}">${fmt.signed(v)}</span>`;
+    $('#orders-count').textContent = `${fmt.num(orders.length)} order${orders.length === 1 ? '' : 's'} across `
+      + `${fmt.num(openSlugs.length)} open market${openSlugs.length === 1 ? '' : 's'}`
+      + ` · ${fmt.num(filled)} filled${working ? ` · ${fmt.num(working)} working` : ''}`
+      + (unfilled ? ` · ${fmt.num(unfilled)} not filled` : '')
+      + ` · ${fmt.num(fillRows.length)} fills`;
+    const head = `<thead><tr><th scope="col">Time (${TZ_LABEL})</th><th scope="col" class="l">Order</th>`
+      + '<th scope="col">Limit</th><th scope="col">Size</th><th scope="col" class="l">Status</th>'
+      + '<th scope="col">Took</th></tr></thead>';
+    const bySlug = new Map();
+    orders.forEach((o) => { if (!bySlug.has(o.slug)) bySlug.set(o.slug, []); bySlug.get(o.slug).push(o); });
+    let body = '';
+    openSlugs.forEach((slug) => {
+      const list = (bySlug.get(slug) || []).slice().sort((a, b) => (b.t || 0) - (a.t || 0));
+      if (!list.length) return;
+      body += `<tr class="fl-market${slug === sel ? ' is-sel' : ''}" data-slug="${esc(slug)}">`
+        + `<td colspan="6" class="l">${orderMarket(slug)}</td></tr>`;
+      list.forEach((o) => {
+        const exit = orderIsSell(o);
+        const prior = ORDERS.drawn.get(o.id);
+        const flash = ORDERS.primed && prior !== o.outcome;
+        ORDERS.drawn.set(o.id, o.outcome);
+        const status = o.outcome === 'sent' || o.outcome === 'resting'
+          ? ['st-live', o.outcome === 'resting' ? 'resting' : 'working']
+          : isFilled(o) ? ['st-filled', o.outcome === 'partial'
+            ? `partial ${o.filled != null ? `${fmt.num(o.filled, 2)} of ${fmt.num(o.size, 2)}` : ''}` : 'filled']
+            : ['st-killed', o.outcome || '—'];
+        const reason = o.reason ? String(o.reason).replace(/_/g, ' ') : '';
+        const took = o.t_done != null && o.t != null ? `${Math.round(o.t_done - o.t)} ms` : '—';
+        body += `<tr data-oid="${esc(o.id || '')}" data-slug="${esc(slug)}" data-side="${esc(o.side || '')}"`
+          + `${flash ? ' class="is-new"' : ''}${reason ? ` title="${esc(reason)}"` : ''}>`
+          + `<td>${fmt.short(o.t)}</td>`
+          + `<td class="l"><span class="act ${exit ? 'act-sell' : 'act-buy'}">${exit ? 'sell' : 'buy'}</span>`
+          + ` <span class="side-tag side-mini" data-side="${esc(o.side || '')}">${esc(o.side || '—')}</span>`
+          + `${exit ? ` <span class="ol-kind">${esc(kindLabel(o.kind))}</span>` : o.kind === 'pair' ? ' <span class="ol-kind">pair bid</span>' : ''}</td>`
+          + `<td>${num3(o.limit)}</td><td>${o.size == null ? '—' : fmt.num(o.size, 2)}</td>`
+          + `<td class="l"><span class="ostat ${status[0]}">${esc(status[1])}</span>`
+          + (isFilled(o) ? ` <span class="ol-fill">@ ${num3(o.price)}</span>`
+            : reason ? `<span class="ol-reason">${esc(reason)}</span>` : '')
+          + `</td><td>${took}</td></tr>`;
+      });
+    });
+    if (!openSlugs.length) {
+      body = '<tr><td colspan="6" class="live-empty">No open markets right now.</td></tr>';
+    } else if (!orders.length) {
+      body = '<tr><td colspan="6" class="live-empty">No orders recorded on the current open markets.</td></tr>';
+    }
+    const fillsTotal = fills ? fmt.num(fillRows.length) : '—';
+    const avgFillPrice = totalShares > 0 ? totalNotional / totalShares : null;
+    const summary = `<tfoot><tr class="fl-total"><td colspan="2" class="l">Total fills · ${fillsTotal}</td>`
+      + `<td>${avgFillPrice == null ? '—' : `VWAP ${px34(avgFillPrice)}`}</td>`
+      + `<td>${sh2(totalShares)}</td>`
+      + `<td colspan="2" class="l">Notional ${usd2(totalNotional)} · Fees ${usd2(totalFees)}</td></tr>`
+      + `<tr class="fl-total"><td colspan="2" class="l">Open position P&amp;L</td>`
+      + `<td colspan="4" class="l">`
+      + `<span title="Marked at each open market's best bid">Now ${pnlSummary(totalPnlNow)}</span>`
+      + ` · <span title="Sum of each market's P&amp;L if its current leader wins">Leaders win ${pnlSummary(totalPnlLeaderWin)}</span>`
+      + ` · <span title="Sum of each market's P&amp;L if its current leader loses">Leaders lose ${pnlSummary(totalPnlLeaderLose)}</span>`
+      + ` · Total cost ${usd2(totalCost)}</td></tr></tfoot>`;
+    table.innerHTML = head + `<tbody>${body}</tbody>` + summary;
+    ORDERS.primed = true;
+    return;
+  }
 
   const shownSlugs = fills ? [...new Set(fills.map((f) => f.slug))] : [];
   const winners = Object.fromEntries(shownSlugs.map((s) => [s, winningSide(s)]));
@@ -4654,17 +5483,15 @@ function renderOrderList(force = false) {
     FILLS.outcomes, orders.length, working, unfilled, shownSlugs.map((s) => winWord(winners[s]))]);
   if (!changed('orderlist', sig) && !force) return;
 
-  const won = ORDERS.scope === 'market' ? winningSide(sel) : null;
   $('#orders-count').textContent = fills && fills.length
     ? `${fmt.num(fills.length)} fill${fills.length === 1 ? '' : 's'}`
       + (ORDERS.scope === 'all' ? ` · newest ${FILL_MARKETS} markets` : '')
-      + (won ? ` · ${winWord(won)}` : '')
       + (orders.length ? ` · ${fmt.num(orders.length)} order${orders.length === 1 ? '' : 's'}`
         + (working ? `, ${working} working` : '') + (unfilled ? `, ${unfilled} not filled` : '') : '')
     : (working ? `${working} order${working === 1 ? '' : 's'} working` : '');
   if (!fills || !fills.length) {
     table.innerHTML = `<tbody><tr><td class="live-empty">${!fills ? 'Loading fills…'
-      : ORDERS.scope === 'market' ? 'No fills on this market yet.' : 'No fills yet.'}</td></tr></tbody>`;
+      : 'No fills yet.'}</td></tr></tbody>`;
     return;
   }
 
@@ -4690,6 +5517,14 @@ function renderOrderList(force = false) {
   let body = '';
   bySlug.forEach((list, slug) => {
     const L = fillLedger(list);
+    const totalShares = list.reduce((n, f) => n + (Number(f.size) || 0), 0);
+    const avgFillPrice = totalShares > 0 ? L.notional / totalShares : null;
+    const held = L.rows.reduce((h, r) => {
+      h[r.side] = r.held;
+      return h;
+    }, { UP: 0, DOWN: 0 });
+    const heldUp = held.UP;
+    const heldDown = held.DOWN;
     const w = winners[slug];
     const upWin = w ? w.side === 'UP' : null, dnWin = w ? w.side === 'DOWN' : null;
     const selCls = slug === sel ? ' is-sel' : '';
@@ -4714,9 +5549,11 @@ function renderOrderList(force = false) {
         + pnlCell(r.thisUp, upWin) + pnlCell(r.thisDn, dnWin) + pnlCell(r.up, upWin) + pnlCell(r.dn, dnWin) + '</tr>';
     });
     body += `<tr class="fl-total${selCls}" data-slug="${esc(slug)}" data-ts="${list[list.length - 1].ts || ''}">`
-      + `<td colspan="5" class="l">Total · ${fmt.num(list.length)} fill${list.length === 1 ? '' : 's'}</td>`
-      + `<td>${usd2(L.notional)}</td><td></td><td>${usd2(L.fees)}</td>`
-      + pnlCell(L.up, upWin) + pnlCell(L.dn, dnWin) + '<td></td><td></td></tr>';
+      + `<td colspan="3" class="l">Total · ${fmt.num(list.length)} fill${list.length === 1 ? '' : 's'}</td>`
+      + `<td>${sh2(totalShares)}</td><td>${avgFillPrice == null ? '—' : px34(avgFillPrice)}</td>`
+      + `<td>${usd2(L.notional)}</td><td title="UP held / DOWN held">${sh2(heldUp)} / ${sh2(heldDown)}</td>`
+      + `<td>${usd2(L.fees)}</td>`
+      + pnlCell(L.up, upWin) + pnlCell(L.dn, dnWin) + pnlCell(L.up, upWin) + pnlCell(L.dn, dnWin) + '</tr>';
   });
   table.innerHTML = head + `<tbody>${body}</tbody>`;
   table.dataset.key = fillsKey();

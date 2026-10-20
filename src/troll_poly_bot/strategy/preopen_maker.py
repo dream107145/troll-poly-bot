@@ -131,6 +131,10 @@ class PreopenMakerEngine(SpotLagEngine):
     feature_key = "pom"
     budget_is_ceiling = True
     stacks_positions = True
+    #: The restart restore path deduplicates legacy duplicate GTC pairs for this engine.
+    one_pair_per_market_side = True
+    #: Penny orders should fill in paper when the ask reaches exactly $0.01.
+    fill_at_touch = True
     #: live.py passes the markets' books to pair_requests (both tokens) when this is set
     wants_books = True
 
@@ -151,6 +155,49 @@ class PreopenMakerEngine(SpotLagEngine):
         self.last_settled: collections.deque = collections.deque(maxlen=100)
         self._spot: tuple[float, float] | None = None          # (ts, price) of the last composite spot seen
         self._prev_settle: dict[int, float] = {}                 # market epoch -> the previous market's settlement value (its strike)
+
+    def persist_state(self) -> dict:
+        """Persist market/order records so a restart cannot quote a market twice."""
+        return {
+            "markets": self.markets,
+            "prev_settle": self._prev_settle,
+            "stats": dict(self.stats),
+            "classes": dict(self.classes),
+            "skips": dict(self.skips),
+            "last_settled": list(self.last_settled),
+        }
+
+    def restore_state(self, doc: dict | None, now: float) -> None:
+        doc = doc or {}
+        self.markets = {str(slug): rec for slug, rec in (doc.get("markets") or {}).items()}
+        self._prev_settle = {int(epoch): float(value) for epoch, value in (doc.get("prev_settle") or {}).items()}
+        self.stats.update(doc.get("stats") or {})
+        self.classes.update(doc.get("classes") or {})
+        self.skips.update(doc.get("skips") or {})
+        self.last_settled.extend(doc.get("last_settled") or [])
+        self._by_order = {
+            str(order["order_id"]): (slug, side)
+            for slug, rec in self.markets.items()
+            for side, order in (rec.get("orders") or {}).items()
+            if order.get("order_id")
+        }
+
+        # Older versions saved held positions and GTC orders but no engine state. Seed
+        # those markets as already quoted, using the restored position as the fill record.
+        for slug, pos in self.risk.open.items():
+            if slug in self.markets or pos.side not in ("UP", "DOWN"):
+                continue
+            self.markets[slug] = {
+                "slug": slug, "open_ts": pos.epoch * 1000.0,
+                "close_ts": (pos.epoch + (900 if self.scfg.market_type == "15m" else 300)) * 1000.0,
+                "placed": True, "skip": None, "t_placed": now, "orders": {},
+                "filled": {"UP": pos.shares if pos.side == "UP" else 0.0,
+                           "DOWN": pos.shares if pos.side == "DOWN" else 0.0},
+                "cost": {"UP": pos.usdc if pos.side == "UP" else 0.0,
+                         "DOWN": pos.usdc if pos.side == "DOWN" else 0.0},
+                "fees": 0.0, "fills": [], "strike": None, "prev_settlement": None,
+                "settled": False, "path": [],
+            }
 
     # ------------------------------------------------------------ the SpotLagEngine surface
 
@@ -251,6 +298,7 @@ class PreopenMakerEngine(SpotLagEngine):
                 px = sc.price_for(side)
                 o = Order(token_id=tok, side=Side.BUY, price=px, size=float(sc.quantity), tif=TimeInForce.GTC,
                           expires_ts=m.close_ts, expected_price=px,
+                          fill_at_touch=self.fill_at_touch,
                           tag=f"{side} preopen bid {px:.2f} x {sc.quantity:g}, {lead:.0f} s before the open")
                 rec["orders"][side] = {"order_id": None, "price": px, "size": float(sc.quantity), "state": "sent", "t": now}
                 out.append((slug, side, o))
@@ -283,7 +331,18 @@ class PreopenMakerEngine(SpotLagEngine):
     def on_pair_submit(self, order_id: str, slug: str, side: str, price: float, shares: float) -> None:
         rec = self.markets.get(slug)
         if rec is None:
-            return
+            # A legacy saved pair can be restored before this market is rediscovered.
+            # Keep a record now so pair_requests will not issue a second pair meanwhile.
+            epoch_text = slug.rsplit("-", 1)[-1]
+            epoch = int(epoch_text) if epoch_text.isdigit() else 0
+            span = 900 if self.scfg.market_type == "15m" else 300
+            rec = self.markets.setdefault(slug, {
+                "slug": slug, "open_ts": epoch * 1000.0, "close_ts": (epoch + span) * 1000.0,
+                "placed": True, "skip": None, "t_placed": None, "orders": {},
+                "filled": {"UP": 0.0, "DOWN": 0.0}, "cost": {"UP": 0.0, "DOWN": 0.0},
+                "fees": 0.0, "fills": [], "strike": None, "prev_settlement": None,
+                "settled": False, "path": [],
+            })
         o = rec["orders"].setdefault(side, {"price": price, "size": shares, "t": None})
         o.update({"order_id": order_id, "state": "resting"})
         self._by_order[order_id] = (slug, side)
